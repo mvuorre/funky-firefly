@@ -1,0 +1,87 @@
+---
+title: TITLE
+shorttitle: SHORT TITLE
+leftheader: SHORT TITLE
+author: 
+  - name: Matti Vuorre
+    affiliation: 1
+    corresponding: yes
+    address: Oxford Internet Institute, University of Oxford
+    email: matti.vuorre@oii.ox.ac.uk
+    role:
+      - role mcrole
+  - name: Author McAuthor
+    affiliation: 2
+    address: Address McAddress
+    email: email@mcemail.com
+    role:
+      - role mcrole
+
+affiliation:
+  - id: 1
+    institution: Oxford Internet Institute, University of Oxford
+  - id: 2
+    institution: Institution McInstitution
+
+authornote: |
+  \noindent \textbf{This manuscript is not yet peer-reviewed.}
+  
+abstract: |
+  Many things, few words.
+  
+keywords: words, key
+wordcount: "`r wordcountaddin:::word_count(filename = 'ms.Rmd')`"
+bibliography: "references.bib"
+floatsintext: yes
+linenumbers: yes
+draft: no
+mask: no
+figurelist: no
+tablelist: no
+footnotelist: no
+csl: "`r system.file('rmd', 'apa7.csl', package = 'papaja')`"
+documentclass: apa7
+classoption: jou
+output: 
+  papaja::apa6_pdf:
+    number_sections: false
+    keep_tex: false
+  papaja::apa6_docx: 
+    number_sections: false
+---
+
+```{r setup, include = FALSE}
+library(papaja)
+
+# Parallel computation options
+MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
+if (is.na(MAX_CORES)) MAX_CORES <- parallel::detectCores(logical = FALSE)
+```
+
+R [@rcoreteamLanguageEnvironmentStatistical2022]
+
+\clearpage
+
+# References
+
+::: {#refs custom-style="Bibliography"}
+:::
+
+
+<!-- Create an appendix with new page, table, and figure numbers. -->
+
+\clearpage
+\onecolumn
+
+# Appendix A: Appendix McAppendix
+
+<!-- Prepend table & figure numbers with S and reset counters -->
+\setcounter{page}{1}
+\setcounter{table}{0}
+\setcounter{figure}{0}
+\renewcommand{\thetable}{A\arabic{table}}
+\renewcommand{\thefigure}{A\arabic{figure}}
+
+```{r include-only-for-pdf}
+#| include: !expr knitr::is_latex_output()
+```
