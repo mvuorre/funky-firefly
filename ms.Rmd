@@ -58,6 +58,18 @@ MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
 if (is.na(MAX_CORES)) MAX_CORES <- parallel::detectCores(logical = FALSE)
 ```
 
+# Introduction
+
+## Centering
+
+## Latent mean centering
+
+# Example analysis
+
+# Simulation study
+
+# Discussion
+
 R [@rcoreteamLanguageEnvironmentStatistical2022]
 
 \clearpage
