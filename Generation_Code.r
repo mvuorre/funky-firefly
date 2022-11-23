@@ -1,31 +1,30 @@
 
 #' Simulate data from a multilevel model
 #'
-#' @param nr_vars 
-#' @param nr_indiv 
-#' @param nr_time 
-#' @param tau 
-#' @param corr 
-#' @param alpha_location 
-#' @param alpha_scale 
-#' @param corr_alpha 
-#' @param beta_location 
-#' @param beta_scale 
-#' @param corr_beta 
+#' @param nr_vars Number of outcome variables
+#' @param nr_indiv Number of individuals
+#' @param nr_time Number of timepoints
+#' @param tau Innovation variance (vector of length `nr_vars`)
+#' @param corr Correlation between outcomes 
+#' @param alpha_location Outcome intercept means
+#' @param alpha_scale Outcome intercept variances (standard deviations?)
+#' @param corr_alpha Correlation between intercepts
+#' @param beta_location Predictor means
+#' @param beta_scale Predictor variances (standard deviations?)
+#' @param corr_beta Correlation between predictors
 #'
 #' @return
 #' @export
 #'
 #' @examples
 simulate_data <- function(
-    # Example values for VAR with two variables
     nr_vars = 2,
     nr_indiv = 100, 
     nr_time = 70,
     
-    tau = c(1,1), # Innovation Variance
+    tau = c(1,1),
     
-    corr = 0.3, # Corr between Y's for fixed inno
+    corr = 0.3, 
     alpha_location = c(4,4.5),
     alpha_scale = c(.5,.5),
     corr_alpha = 0.3,
