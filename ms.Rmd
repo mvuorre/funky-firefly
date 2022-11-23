@@ -1,5 +1,5 @@
 ---
-title: Why, when and how to latent mean center variables in multilevel models
+title: 'Bias no more! A practical guide to latent mean centering in multilevel models'
 shorttitle: Latent mean centering
 leftheader: Latent mean centering
 author: 
@@ -27,7 +27,12 @@ authornote: |
   \noindent \textbf{This manuscript is not yet peer-reviewed.}
   
 abstract: |
-  Many things, few words.
+  Here's a plan.
+  
+  - Longitudinal and repeated measures are becoming more common because SCIENCE
+  - Centering is crucial, but...
+  - Latent mean centering! Like a whole section of words!
+  - tbd
   
 keywords: words, key
 wordcount: "`r wordcountaddin:::word_count(filename = 'ms.Rmd')`"
@@ -52,10 +57,24 @@ output:
 
 ```{r setup, include = FALSE}
 library(papaja)
+library(posterior)
+library(ggdist)
+library(brms)
+library(tidyverse)
 
-# Parallel computation options
+# HMC and parallel computation options
 MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
 if (is.na(MAX_CORES)) MAX_CORES <- parallel::detectCores(logical = FALSE)
+THREADS <- 1
+CORES <- MAX_CORES
+ITER <- 10000
+if (require(cmdstanr)) {
+  options(brms.backend = "cmdstanr")
+  THREADS <- MAX_CORES %/% 4
+}
+
+# Save models in a directory
+dir.create("models", FALSE)
 ```
 
 # Introduction
@@ -65,6 +84,111 @@ if (is.na(MAX_CORES)) MAX_CORES <- parallel::detectCores(logical = FALSE)
 ## Latent mean centering
 
 # Example analysis
+
+<!-- Just a toy example for now to write some code -->
+
+```{r}
+# Data from McNeish
+d <- read_csv("data/Two-Level Data.csv", col_names = FALSE)[,c(5:6,1:2)]
+names(d) <- c("person","time","urge", "dep")
+d <- d %>% 
+  # Create lagged variable
+  group_by(person) %>% 
+  mutate(urge1 = lag(urge)) %>% 
+  ungroup()
+
+# Model definition from https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424/22
+# Estimate depBI (latent means) using nlf() inside bf()
+model <- bf(
+  urge ~ alpha + phi*(urge1 - alpha) + beta*(dep - depB),
+  alpha ~ 1 + (1 | person),
+  phi ~ 1 + (1 | person),
+  beta ~ 1 + (1 | person),
+  nlf(depB ~ depBI),
+  depBI ~ 1 + (1 | person),
+  nl = TRUE
+) +
+  gaussian()
+
+p <- get_prior(model, data = d) %>%
+  mutate(
+    prior = case_when(
+      class == "b" & coef == "Intercept" ~ "normal(0, 1.5)",
+      class == "sd" & coef == "Intercept" ~ "student_t(7, 0, 1)",
+      TRUE ~ prior
+    )
+  )
+
+fit1 <- brm(
+  model,
+  data = d,
+  prior = p,
+  cores = MAX_CORES,
+  threads = THREADS,
+  iter = ITER,
+  control = list(adapt_delta = 0.99),
+  file = "models/m_mh91"
+)
+
+# Code example from Ethan McCormick
+# Matti's code edited to add `depb` as 'main effect'
+# Estimate model without nlf() with depb added to the first formula
+# This seems to be slightly different as it adds depb as predictor of urge?
+# But under typical conditions these should give similar key estimates (?)
+model <- bf(
+  urge ~ alpha + phi*(urge1 - alpha) + depb + beta*(dep - depb),
+  alpha ~ 1 + (1 | person),  # Latent intercept of urge
+  depb ~ 1 + (1 | person),  # Latent mean of depression
+  phi ~ 1 + (1 | person),  # Slope of latent mean-person centered lagged urge on urge
+  beta ~ 1 + (1 | person),  # Slope of latent mean-person centered depression on urge
+  nl = TRUE,
+  center = FALSE. # This seems key
+) +
+  gaussian()
+
+#Set priors
+p <- get_prior(model, data = d) %>% 
+  mutate(
+    prior = case_when(
+      class == "b" & coef == "Intercept" ~ "normal(0, 1.5)",
+      class == "sd" & coef == "Intercept" ~ "student_t(7, 0, 1)",
+      TRUE ~ prior
+    )
+  )
+
+fit2 <- brm(
+  model,
+  data = d,
+  prior = p, 
+  cores = MAX_CORES,
+  threads = THREADS,
+  iter = ITER,
+  control = list(adapt_delta = 0.99),
+  file = "models/m_mh5"
+)
+
+bind_rows(
+  as_draws_df(fit1, variable = c("b_", "sd_", "sigma"), regex = TRUE),
+  as_draws_df(fit2, variable = c("b_", "sd_", "sigma"), regex = TRUE) %>% 
+    rename_with(~str_replace(., "depb", "depBI")), 
+  .id = "Model"
+) %>% 
+  mutate(
+    Model = factor(Model, labels = c("nlf()", "bf()")),
+    ) %>% 
+  select(-c(.chain, .iteration, .draw)) %>% 
+  pivot_longer(-Model) %>% 
+  ggplot(aes(value, name, col = Model, fill = Model)) +
+  stat_halfeye(
+    data = . %>% filter(Model == "nlf()"),
+    side = "top", normalize = "xy", height = .5
+  ) +
+  stat_halfeye(
+    data = . %>% filter(Model == "bf()"),
+    side = "bottom", normalize = "xy", height = .5
+  )
+```
+
 
 # Simulation study
 
@@ -76,7 +200,6 @@ R [@rcoreteamLanguageEnvironmentStatistical2022]
 
 # Acknowledgements
 
-We would like to thank Mauricio Garnier-Villarre, Simon Brauer, Ethan McCormick, and everyone else who contributed to the discussion and development of the correct brms syntax on the Stan discussion board (https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424). Special thanks to Mauricio Garnier-Villarre for being the first to post the syntax that the code here was based on. We believe developing methods and theories collaboratively, and in the open, to be a fruitful path forward in better understanding human behavior and how to best model it.
 We would like to thank Mauricio Garnier-Villarreal, Simon Brauer, Ethan McCormick, and everyone else who contributed to the discussion and development of the correct brms syntax on the Stan discussion board (https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424). Special thanks to Mauricio Garnier-Villarreal for being the first to post the syntax that the code here was based on. We believe developing methods and theories collaboratively, and in the open, to be a fruitful path forward in better understanding human behavior and how to best model it.
 
 # References
