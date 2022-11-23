@@ -1,7 +1,7 @@
 ---
-title: TITLE
-shorttitle: SHORT TITLE
-leftheader: SHORT TITLE
+title: Why, when and how to latent mean center variables in multilevel models
+shorttitle: Latent mean centering
+leftheader: Latent mean centering
 author: 
   - name: Matti Vuorre
     affiliation: 1
@@ -61,6 +61,10 @@ if (is.na(MAX_CORES)) MAX_CORES <- parallel::detectCores(logical = FALSE)
 R [@rcoreteamLanguageEnvironmentStatistical2022]
 
 \clearpage
+
+# Acknowledgements
+
+We would like to thank Mauricio Garnier-Villarre, Simon Brauer, Ethan McCormick, and everyone else who contributed to the discussion and development of the correct brms syntax on the Stan discussion board (https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424). Special thanks to Mauricio Garnier-Villarre for being the first to post the syntax that the code here was based on. We believe developing methods and theories collaboratively, and in the open, to be a fruitful path forward in better understanding human behavior and how to best model it.
 
 # References
 
