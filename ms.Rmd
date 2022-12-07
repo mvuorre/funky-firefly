@@ -82,7 +82,7 @@ dir.create("models", FALSE)
 
 # Plotting options
 theme_set(
-  theme_linedraw(base_size = 9.6) +
+  theme_linedraw(base_size = 10) +
     theme(
       strip.background = element_rect(fill = "gray90", color = "gray90"),
       strip.text = element_text(color = "black", hjust = 0),
@@ -93,11 +93,15 @@ theme_set(
 
 # Introduction
 
+However, previously latent mean centering has only been available through commercial software packages (MPlus), and was suggested to only apply to latent variables models (M & H). We show a general approach to latent group mean centering using the freely available and flexible R package Bayesian Regression Modelling using Stan (brms; Bürkner), and that latent mean centering applies to *all* analyses of repeated measures (or, generally, clustered) data.
+
 ## Centering
 
 ## Latent mean centering
 
 # Example analysis
+
+To illustrate latent group-mean centering in practice, we introduce an example dataset of 100 Dutch adolescents, from a study by [@cite].
 
 <!-- Just a toy example for now to write some code -->
 
