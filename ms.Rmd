@@ -58,6 +58,7 @@ output:
 ```{r setup, include = FALSE}
 library(papaja)
 library(posterior)
+library(scales)
 library(ggdist)
 library(brms)
 library(tidyverse)
@@ -75,6 +76,16 @@ if (require(cmdstanr)) {
 
 # Save models in a directory
 dir.create("models", FALSE)
+
+# Plotting options
+theme_set(
+  theme_linedraw(base_size = 9.6) +
+    theme(
+      strip.background = element_rect(fill = "gray90", color = "gray90"),
+      strip.text = element_text(color = "black", hjust = 0),
+      panel.grid = element_blank()
+    )
+)
 ```
 
 # Introduction
