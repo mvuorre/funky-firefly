@@ -54,10 +54,17 @@ output:
 ```{r setup, include = FALSE}
 library(papaja)
 library(posterior)
+library(knitr)
 library(scales)
 library(ggdist)
 library(brms)
 library(tidyverse)
+
+# Document options
+opts_chunk$set(
+  cache = TRUE,
+  echo = FALSE
+)
 
 # HMC and parallel computation options
 MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
