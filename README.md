@@ -8,4 +8,4 @@ This project is currently developed here: <https://mvuorre.github.io/posts/stan-
 
 # Contributing
 
-I'm trying to track this project on [GitHub issues](https://github.com/mvuorre/latent-mean-centering-ms/issues). Feel free to peruse there for tasks that I think need to be done at the moment, or propose new ones. Contributions, if possible, via pull requests (if not, independent `.R` scripts or text files work just fine!)
+I'm trying to track this project on [GitHub issues](https://github.com/mvuorre/latent-mean-centering-ms/issues). Feel free to peruse there for tasks that I think need to be done at the moment, or propose new ones. Contributions, if possible, via pull requests from dev or a feature branch to main. If not, independent `.R` scripts or text files (preferably on dev) work just fine!
