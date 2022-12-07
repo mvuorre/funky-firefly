@@ -1,7 +1,7 @@
 ---
-title: 'Bias no more! A practical guide to latent mean centering in multilevel models'
-shorttitle: Latent mean centering
-leftheader: Latent mean centering
+title: 'Bias no more: A practical guide to latent group-mean centering in longitudinal and other hierarchical bayesian models'
+shorttitle: Latent group-mean centering
+leftheader: Latent group-mean centering
 author: 
   - name: Matti Vuorre
     affiliation: 1
@@ -24,17 +24,13 @@ affiliation:
     institution: Institution McInstitution
 
 authornote: |
-  \noindent \textbf{This manuscript is not yet peer-reviewed.}
+  \noindent \textit{This manuscript is not yet peer-reviewed.}
   
 abstract: |
-  Here's a plan.
+  Researchers studying the contributions of observed variables on other variables in longitudinal and other repeated measures data sets have long recognized the importance of group-mean centering variables in order to isolate within- and between-person causal processes. However, a critically important issue in centering---treating the person means as unknown parameters rather than observed quantities---has received less attention among applied practitioners. One reason for this has been the general unavailability and perceived complexity of latent group-mean centering versus observed mean centering. 
+  In this practical tutorial, we introduce code for latent group-mean centering in longitudinal and hierarchical models using the free and open source software R and specifically the brms R package. We show via analyses of data on well-being and technology use that latent mean centering is not only important, easy, but also fun. We hope that these examples, and the general FOSS availability of the discussed methods encourage more researchers to adopt latent mean centering instead of oserved mean centering to avoid bias in parameter estimates. We also discuss relations between longitudinal models / SEM / multilevel models / bayes. Bayes!
   
-  - Longitudinal and repeated measures are becoming more common because SCIENCE
-  - Centering is crucial, but...
-  - Latent mean centering! Like a whole section of words!
-  - tbd
-  
-keywords: words, key
+keywords: longitudinal data, repeated measures, centering, well-being, technology effects
 wordcount: "`r wordcountaddin:::word_count(filename = 'ms.Rmd')`"
 bibliography: "references.bib"
 floatsintext: yes
