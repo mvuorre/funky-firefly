@@ -203,6 +203,41 @@ bind_rows(
 
 # Simulation study
 
+```{r}
+#| label: fig-me-in-means
+#| eval: false
+#| include: false
+#| fig.cap: Illustration of the risks associated with using observed means for group-mean centering, and how those are avoided by using latent means to group-mean center instead.
+
+# A suggestion for an illustrative figure, showing risks (bias) of observed mean centering, but also how latent mean centering avoids them.
+
+tibble(
+  n = seq(1, 100, by = .1),
+  s = 1/sqrt(n)
+  ) %>% 
+  ggplot(aes(n, s)) +
+  scale_y_continuous(
+    "Measurement error in observed mean",
+    limits = 0:1, 
+    breaks = extended_breaks(),
+    expand = expansion(c(.02, .05))
+  ) +
+  scale_x_continuous(
+    "Number of measurements",
+    expand = expansion(.025, .025)
+  ) +
+  # Theoretical measurement error in mean
+  geom_line()
+  # More lines or panels
+  # Observed dynamic panel bias from a simulation
+  # geom_line(something something)
+  # Observed bias in other covariate from a simulation
+  # geom_line(also something something)
+  # Latent mean centering results--lines that are not biased
+  # geom_line(...)
+```
+
+
 # Discussion
 
 R [@rcoreteamLanguageEnvironmentStatistical2022]
