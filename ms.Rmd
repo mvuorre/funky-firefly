@@ -68,13 +68,13 @@ opts_chunk$set(
 
 # HMC and parallel computation options
 MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
-if (is.na(MAX_CORES)) MAX_CORES <- parallel::detectCores(logical = FALSE)
+if (is.na(MAX_CORES)) MAX_CORES <- parallelly::availableCores(logical = FALSE)
 THREADS <- 1
-CORES <- MAX_CORES
 ITER <- 10000
+CHAINS <- 4
 if (require(cmdstanr)) {
   options(brms.backend = "cmdstanr")
-  THREADS <- MAX_CORES %/% 4
+  THREADS <- MAX_CORES %/% CHAINS
 }
 
 # Save models in a directory
