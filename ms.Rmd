@@ -1,46 +1,40 @@
 ---
-title: 'Bias no more: A practical guide to latent group-mean centering in longitudinal and other hierarchical bayesian models'
+title: 'Bias no more: Introduction to latent group-mean centering in hierarchical bayesian models'
 shorttitle: Latent group-mean centering
 leftheader: Latent group-mean centering
 author: 
   - name: Matti Vuorre
     affiliation: 1
     corresponding: yes
-    address: Oxford Internet Institute, University of Oxford
-    email: matti.vuorre@oii.ox.ac.uk
-    role:
-      - role mcrole
-  - name: Author McAuthor
+    address: Tilburg University
+    email: m.j.vuorre@tilburguniversity.edu
+  - name: Author 2
     affiliation: 2
-    address: Address McAddress
-    email: email@mcemail.com
-    role:
-      - role mcrole
+    address: 
+    email: 
 
 affiliation:
   - id: 1
-    institution: Oxford Internet Institute, University of Oxford
+    institution: Tilburg University
   - id: 2
-    institution: Institution McInstitution
+    institution: Institution 2
 
 authornote: |
   \noindent \textit{This manuscript is not yet peer-reviewed.}
   
 abstract: |
-  Researchers studying the contributions of observed variables on other variables in longitudinal and other repeated measures data sets have long recognized the importance of group-mean centering variables in order to isolate within- and between-person causal processes. However, a critically important issue in centering---treating the person means as unknown parameters rather than observed quantities---has received less attention among applied practitioners. One reason for this has been the general unavailability and perceived complexity of latent group-mean centering versus observed mean centering. 
-  In this practical tutorial, we introduce code for latent group-mean centering in longitudinal and hierarchical models using the free and open source software R and specifically the brms R package. We show via analyses of data on well-being and technology use that latent mean centering is not only important, easy, but also fun. We hope that these examples, and the general FOSS availability of the discussed methods encourage more researchers to adopt latent mean centering instead of oserved mean centering to avoid bias in parameter estimates. We also discuss relations between longitudinal models / SEM / multilevel models / bayes. Bayes!
+  Researchers studying links between observed variables in longitudinal and other repeated measures data sets have long recognized the importance of person-mean centering in order to isolate within- and between-person associations. However, a critical issue in centering---treating the person means as unknown parameters rather than observed values---has received less attention among applied practitioners. One reason for this has been the general unavailability and perceived complexity of latent person-mean centering in contrast to observed mean centering. Here, we introduce latent person-mean centering and accessible syntax for implementing it in a wide variety of flexible bayesian models with the R package brms. We demonstrate the syntax, and benefits of latent centering, through an example analysis of social media effects on adolescent well-being. In appendices, we further contrast the performance of latent mean centering to observed mean centering via simulations, and show how it extends to more than two levels of analysis. Latent mean centering provides unbiased estimates of within- and between-person associations, and we hope that the availability and flexibility of our proposed approach motivates researchers to apply this method widely in longitudinal and other multilevel modelling scenarios.
   
 keywords: longitudinal data, repeated measures, centering, well-being, technology effects
 wordcount: "`r wordcountaddin:::word_count(filename = 'ms.Rmd')`"
 bibliography: "references.bib"
 floatsintext: yes
-linenumbers: yes
+linenumbers: no
 draft: no
 mask: no
 figurelist: no
 tablelist: no
 footnotelist: no
-csl: "`r system.file('rmd', 'apa7.csl', package = 'papaja')`"
 documentclass: apa7
 classoption: jou
 output: 
@@ -53,6 +47,7 @@ output:
 
 ```{r setup, include = FALSE}
 library(papaja)
+library(citr)
 library(posterior)
 library(knitr)
 library(scales)
@@ -70,7 +65,7 @@ opts_chunk$set(
 MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
 if (is.na(MAX_CORES)) MAX_CORES <- parallelly::availableCores(logical = FALSE)
 THREADS <- 1
-ITER <- 10000
+ITER <- 5000
 CHAINS <- 4
 if (require(cmdstanr)) {
   options(brms.backend = "cmdstanr")
@@ -91,53 +86,113 @@ theme_set(
 )
 ```
 
+```{r data-download}
+# Download data if not downloaded
+path <- "data/beyens-et-al-2021.csv"
+dir.create(dirname(path), FALSE)
+if (!file.exists(path)) 
+  download.file("https://uvaauas.figshare.com/ndownloader/files/28057809", path)
+
+# Load and clean
+d <- read_csv(path) %>%
+  # Subset data to a handful of participants' evening observations
+  filter(
+    BeepTE1 == 6,
+    ID %in% sample(.$ID, 30)
+  ) %>% 
+  mutate(
+    person = factor(ID),
+    time = BeepNE1,
+    # Sum of all passive use in the past hour
+    sm = rowSums(select(., INP01E1, INP02E1, WAP01E1, SNP01E1, SNP02E1), na.rm = TRUE),
+    # It can exceed 60 if p reported multiple overlapping uses
+    sm = if_else(sm > 60, 60, sm),
+    happy = AWBE1,
+    .keep = "none"
+  ) %>% 
+  # Drop missing data
+  drop_na(sm, happy)
+
+# Lagged and centered variables
+d <- d %>% 
+  # Lag happiness by person
+  mutate(
+    happy1 = lag(happy), 
+    .by = person
+  ) %>% 
+  # Grand mean center so between-person component is centered on zero
+  mutate(
+    smg = sm - mean(sm, na.rm = TRUE)
+  ) %>% 
+  # Calculate person means and person-specific deviations therein
+  mutate(
+    smb = mean(smg, na.rm = TRUE), 
+    smw = smg - smb,
+    happy1w = happy1 - mean(happy1, na.rm = TRUE),
+    .by = person
+  )
+```
+
+
 # Introduction
 
-However, previously latent mean centering has only been available through commercial software packages (MPlus), and was suggested to only apply to latent variables models (M & H). We show a general approach to latent group mean centering using the freely available and flexible R package Bayesian Regression Modelling using Stan (brms; Bürkner), and that latent mean centering applies to *all* analyses of repeated measures (or, generally, clustered) data.
+In longitudinal and other repeated measures data where predictors are observed associations can emerge at two (or more) levels: Between individuals and within individuals [@bolgerIntensiveLongitudinalMethods2013]. Because these two levels of analysis can embody different theoretical constructs, researchers have widely recognized the importance of centering the data appropriately, such that within-person associations can be estimated independently from between-person associations [@endersCenteringPredictorVariables2007]. If this distinction between sources of variance is not made, the resulting estimates are likely to be confusing mixtures of associations that occur between individuals and within individuals [@cronbachResearchClassroomsSchools1976 p.18; @raudenbushHierarchicalLinearModels2002 p.138]. Specifically, when a predictor can vary at two levels---observations varying around a person's average, and persons' averages varying around the global average---it is common to manipulate the data such that the analysis distinguishes those two levels.
 
-## Centering
+In typical applications, a predictor is separated into two components: First, each individual's mean is calculated. Including the person mean as predictor in a regression model will describe the extent to which individuals with different average levels of the predictor differ on the outcome variable. Second, the individuals' means are subtracted from each observation, leading to a variable that indicates deviations around each person's average. This latter variable represents pure within-person variability. Including it as a model predictor leads to estimating how the outcome differs at different levels of the predictor, for the average person. Typically, it is this latter within-person association that is of key theoretical interest in psychology: It can be used to describe a counterfactual causal scenario where increasing the predictor for an individual leads to changes in that person's outcome [@rohrerTheseAreNot2021].
 
-## Latent mean centering
+While simple to implement, this data manipulation trick has one potentially severe shortcoming: It can lead to biases in the estimated regression coefficients, especially when the number of observations per person is small. These biases result from ignoring the uncertainty inherent in the person means: They can only be estimated based on a sample of limited data, but simple calculations cannot carry this uncertainty forward into the resulting estimates. While this issue is recognized in the methodological literature [e.g. @asparouhovLatentVariableCentering2019; @mcneishPrimerTwolevelDynamic2020], practical implementations to overcome it have so far been limited to commercial solutions, most prominently the SEM software MPlus. In this manuscript, we provide a practical tutorial on latent mean centering in the context of longitudinal and repeated measures data in psychology. We implement latent mean centering in a series of multilevel models using the brms R package. Our aim is to provide this illustrative code so that latent mean centering can be more widely adopted within the psychological sciences.
 
-# Example analysis
+In appendix A(?), we also conduct a simulation study to illustrate the conditions under which latent mean centering is most useful: As the number of observations per participant decreases, the beneficial debiasing effect of latent mean centering becomes more noticeable and important. In addition, while previous work has focused on latent mean centering specifically in the context of longitudinal datasets and timeseries analyses, we point out that it is a more general issue and applicable to datasets with potentially multiple levels of analysis? In appendix B, we extend the syntax to a three level model where latent means are estimated for adolescents nested within classes?
 
-To illustrate latent group-mean centering in practice, we introduce an example dataset of 100 Dutch adolescents, from a study by [@cite].
+# Latent mean centering tutorial
 
-<!-- Just a toy example for now to write some code -->
+In this example analysis, we examine a longitudinal dataset of Dutch adolescents' social media use and well-being. The authors of the original research article have made their valuable data openly available, which we appreciate. The sample consists of 387 Dutch adolescents (mean age: 14, 54% girls), who answered 34,930 experience sampling questions about their well-being ("How happy do you feel right now?"; 1: "Not at all", 4: "A little", 7: "Completely") and social media use. For this analysis, we used the sum of passive Instagram, WhatsApp, and Snapchat reported in the past hour. We show a snippet of this data in Table \@ref(tab:tab-data).
 
 ```{r}
-# Data from McNeish
-d <- read_csv("data/Two-Level Data.csv", col_names = FALSE)[,c(5:6,1:2)]
-names(d) <- c("person","time","urge", "dep")
-d <- d %>% 
-  # Create lagged variable
-  group_by(person) %>% 
-  mutate(urge1 = lag(urge)) %>% 
-  ungroup()
+#| label: tab-data
+d %>% 
+  slice(1:3, .by = person) %>% 
+  head() %>% 
+  apa_table(
+    caption = "Six rows of example data", 
+    note = "sm = passive social media use; smg = grand-mean centered sm; smb = between-person sm; smw = within-person sm; happyw1 = within-person lagged happiness rating.",
+    col_spanners = list(`Original data` = c(1, 5), `Centered values` = c(6, 9)),
+    digits = c(0, 0, 0, 0, 0, 0, 1, 1, 1), 
+    font_size = "small", 
+    span_text_columns = FALSE
+  )
+```
 
-# Model definition from https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424/22
-# Estimate depBI (latent means) using nlf() inside bf()
+Table \@ref(tab:tab-data) shows the three first observations of two randomly selected participants from the sample. The first four columns contain an anomyous person identifier, the observation time point (an increasing integer), the number of minutes of passive social media use in the past hour, and the happiness rating. Then, for illustration, we have created three additional columns containing the centered social media use variables. The first, "smg", is the simple grand-mean centered "sm" variable. This variable is not required in all analyses. However, it can be used to zero-center the between-person variable if it is of interest. "smb" is the between-person component, which is simply that person's sample mean. "smw" is the deviation of the social media use value on that row from the person's mean, and thus the within-person component.
+
+We loosely follow the authors' original analysis, which focused on the associations between social media use and happiness. To ground our tutorial on common practices, we first ignore latent mean centering, and describe the analysis in terms of the observed values. In this analysis, we are interested in the within- and between-person associations between passive social media use in the past hour and current well-being. To do so, we define a multilevel model of happiness ratings on both "smw" and "smb", and allow for random variability in person-specific averages in happiness ratings, and the association between happiness ratings and "smw". 
+
+**Throw in a line here about why the autoregressive term is included.**
+
+In typical R formula syntax, generalized for multilevel models in the lme4 package, this model is
+
+
+
+
+which translates to the mixed effects model in Box 1. This model returns three key population-level estimates---parameter values assumed to hold for the average person in the population from which the sample was drawn: An intercept, slope of "smb", and slope of "smw". The first describes the happiness level of an average individual who passively used an average amount of social media in the past hour, and 
+
+```{r}
+#| eval: false
 model <- bf(
-  urge ~ alpha + phi*(urge1 - alpha) + beta*(dep - depB),
-  alpha ~ 1 + (1 | person),
-  phi ~ 1 + (1 | person),
-  beta ~ 1 + (1 | person),
-  nlf(depB ~ depBI),
-  depBI ~ 1 + (1 | person),
-  nl = TRUE
+  happy ~ b0happy + b1happy*(happy1 - b0happy) + b2happy*(sm - b0sm),
+  b0happy ~ 1 + (1 | person),
+  b1happy ~ 1 + (1 | person),
+  b2happy ~ 1 + (1 | person),
+  b0sm ~ 1 + (1 | person),
+  nl = TRUE,
+  center = FALSE
 ) +
   gaussian()
 
-p <- get_prior(model, data = d) %>%
-  mutate(
-    prior = case_when(
-      class == "b" & coef == "Intercept" ~ "normal(0, 1.5)",
-      class == "sd" & coef == "Intercept" ~ "student_t(7, 0, 1)",
-      TRUE ~ prior
-    )
-  )
+# Set priors
+p <- prior(normal(30, 15), class = b, coef = Intercept, nlpar = b0sm)
 
-fit1 <- brm(
+fit <- brm(
   model,
   data = d,
   prior = p,
@@ -145,66 +200,9 @@ fit1 <- brm(
   threads = THREADS,
   iter = ITER,
   control = list(adapt_delta = 0.99),
-  file = "models/m_mh91"
+  file = "models/brm-fit-1"
 )
-
-# Code example from Ethan McCormick
-# Matti's code edited to add `depb` as 'main effect'
-# Estimate model without nlf() with depb added to the first formula
-# This seems to be slightly different as it adds depb as predictor of urge?
-# But under typical conditions these should give similar key estimates (?)
-model <- bf(
-  urge ~ alpha + phi*(urge1 - alpha) + depb + beta*(dep - depb),
-  alpha ~ 1 + (1 | person),  # Latent intercept of urge
-  depb ~ 1 + (1 | person),  # Latent mean of depression
-  phi ~ 1 + (1 | person),  # Slope of latent mean-person centered lagged urge on urge
-  beta ~ 1 + (1 | person),  # Slope of latent mean-person centered depression on urge
-  nl = TRUE,
-  center = FALSE # This seems key
-) +
-  gaussian()
-
-#Set priors
-p <- get_prior(model, data = d) %>% 
-  mutate(
-    prior = case_when(
-      class == "b" & coef == "Intercept" ~ "normal(0, 1.5)",
-      class == "sd" & coef == "Intercept" ~ "student_t(7, 0, 1)",
-      TRUE ~ prior
-    )
-  )
-
-fit2 <- brm(
-  model,
-  data = d,
-  prior = p, 
-  cores = MAX_CORES,
-  threads = THREADS,
-  iter = ITER,
-  control = list(adapt_delta = 0.99),
-  file = "models/m_mh5"
-)
-
-bind_rows(
-  as_draws_df(fit1, variable = c("b_", "sd_", "sigma"), regex = TRUE),
-  as_draws_df(fit2, variable = c("b_", "sd_", "sigma"), regex = TRUE) %>% 
-    rename_with(~str_replace(., "depb", "depBI")), 
-  .id = "Model"
-) %>% 
-  mutate(
-    Model = factor(Model, labels = c("nlf()", "bf()")),
-    ) %>% 
-  select(-c(.chain, .iteration, .draw)) %>% 
-  pivot_longer(-Model) %>% 
-  ggplot(aes(value, name, col = Model, fill = Model)) +
-  stat_halfeye(
-    data = . %>% filter(Model == "nlf()"),
-    side = "top", normalize = "xy", height = .5
-  ) +
-  stat_halfeye(
-    data = . %>% filter(Model == "bf()"),
-    side = "bottom", normalize = "xy", height = .5
-  )
+summary(fit, prior = TRUE)
 ```
 
 
@@ -249,9 +247,27 @@ tibble(
 
 R [@rcoreteamLanguageEnvironmentStatistical2022]
 
-\clearpage
+# Author Contributions
+
+Conceptualization: MV
+Methodology: MV
+Software: MV
+Validation: MV
+Formal Analysis: MV
+Data Curation: MV
+Writing -- Original Draft: MV
+Writing -- Review & Editing: MV
+Visualization: MV
+Supervision: MV
+Project Administration: MV
+
+# Conflicts of Interest
+
+The author(s) declare that there were no conflicts of interest with respect to the authorship or the publication of this article.
 
 # Acknowledgements
+
+We thank everyone who contributed to this discussion on the Stan discussion board (https://web.archive.org/web/20230207111825/https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424).
 
 # References
 
@@ -264,7 +280,7 @@ R [@rcoreteamLanguageEnvironmentStatistical2022]
 \clearpage
 \onecolumn
 
-# Appendix A: Appendix McAppendix
+# Appendix Z: Simulation study
 
 <!-- Prepend table & figure numbers with S and reset counters -->
 \setcounter{page}{1}
@@ -273,6 +289,98 @@ R [@rcoreteamLanguageEnvironmentStatistical2022]
 \renewcommand{\thetable}{A\arabic{table}}
 \renewcommand{\thefigure}{A\arabic{figure}}
 
-```{r include-only-for-pdf}
-#| include: !expr knitr::is_latex_output()
+Hereafter be monsters and dragons
+
+```{r data-create}
+# Simple simulation scheme
+# happiness predicted from within-person social media use, and happiness(t-1).
+library(MASS)
+library(faux)
+library(lme4)
+
+# Numbers of people and observations
+n_person <- 50
+n_time <- 5
+# Population level parameters
+beta <- c(
+  4, # Happiness intercept
+  .2, # happy <- social media within
+  .25, # happy <- happy(t-1)
+  30 # Social media intercept
+)
+names(beta) <- c("b0happy", "b1happy", "b2happy", "b0sm")
+# Standard deviations across people (in same order)
+# Note b3happy is "fixed" (0)
+tau <- c(1, .2, .075, 5)
+# Random effect standard deviations (same for all pairs)
+rho <- .3
+# Standard deviations of observations
+sigma <- c(sigmahappy = 0.5, sigmasm = 5)
+
+# Generate person-level parameters
+x <- rnorm_multi(
+  n = n_person,
+  mu = beta,
+  sd = tau,
+  r = rho,
+  empirical = TRUE
+) %>% 
+  mutate(
+    sigmahappy = sigma[1],
+    sigmasm = sigma[2]
+  )
+
+# Repeate rows and create outcomes
+x <- x %>% 
+  rownames_to_column("person") %>% 
+  crossing(time = 1:n_time) %>% 
+  mutate(
+    sm = rnorm(nrow(.), b0sm, sigmasm),
+    happy = rnorm(nrow(.), b0happy + b1happy*(sm - b0sm), sigmahappy)
+  ) %>% 
+  mutate(
+    happy1 = lag(happy),
+    happy = happy + happy1*b2happy,
+    .by = person
+  )
+
+x <- x %>% 
+  mutate(
+    smb = mean(sm),
+    smw = sm - smb,
+    .by = person
+  )
+y <- lmer(
+  happy ~ smw + happy1 + (smw + happy1 | person),
+  data = x
+)
 ```
+
+```{r}
+model <- bf(
+  happy ~ b0happy + b1happy*(happy1 - b0happy) + b2happy*(sm - b0sm),
+  b0happy ~ 1 + (1 | person),
+  b1happy ~ 1 + (1 | person),
+  b2happy ~ 1 + (1 | person),
+  b0sm ~ 1 + (1 | person),
+  nl = TRUE,
+  center = FALSE
+) +
+  gaussian()
+
+# Set priors
+p <- prior(normal(30, 15), class = b, coef = Intercept, nlpar = b0sm)
+
+fit <- brm(
+  model,
+  data = d,
+  prior = p,
+  cores = MAX_CORES,
+  threads = THREADS,
+  iter = ITER,
+  control = list(adapt_delta = 0.99),
+  file = "models/brm-fit-1"
+)
+summary(fit, prior = TRUE)
+```
+
