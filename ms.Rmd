@@ -266,7 +266,12 @@ y_{ij} &\sim \operatorname{Normal}(
   \beta_{1j}(y_{[i-1]j} - \alpha_{yj}) +
   \beta_{2j}(x_{[i-1]j} - \alpha_{xj}), 
   \sigma^2_y
-) \\ \\
+)
+\end{align*}
+
+The second model equation above specifies that the $\beta$s model effects of the within-person deviated variables of lagged y and x, by virtue of subtracting from each their respective person-specific (latent) mean. I hope. Then we specify the rest of the multilevel model as usual, butchering the notation with bars to indicate average or population-level regression coefficients. We also specify matrices of standard deviations S and correlations R to pop into the covariance matrix (as those will be estimated, rather than covariances, by brms/Stan).
+
+\begin{align*}
 \begin{bmatrix} 
   \alpha_x \\ \alpha_y \\ \beta_1 \\ \beta_2
 \end{bmatrix} &\sim \operatorname{MVN}(
@@ -275,10 +280,10 @@ y_{ij} &\sim \operatorname{Normal}(
 \end{bmatrix}, \mathbf{\Sigma}) \\ \\
 \Sigma &= \mathbf{SRS} \\ \\
 \mathbf{S} &= \begin{bmatrix} 
-  \tau_0 &0 &0 &0 \\ 
-  0 &\tau_1 &0 &0\\ 
-  0 &0 &\tau_2 &0 \\ 
-  0 &0 &0 &\tau_3
+  \tau_{\alpha_x} &0 &0 &0 \\ 
+  0 &\tau_{\alpha_y} &0 &0\\ 
+  0 &0 &\tau_{\beta_1} &0 \\ 
+  0 &0 &0 &\tau_{\beta_2}
 \end{bmatrix} \\ \\
 \mathbf{R} &= 
 \begin{bmatrix} 
@@ -288,6 +293,27 @@ y_{ij} &\sim \operatorname{Normal}(
   \rho_{\alpha_x\beta_2} &\rho_{\alpha_y\beta_2} &\rho_{\beta_1\beta_2} &1 \\
 \end{bmatrix}.
 \end{align*}
+
+We then estimate the resulting datasets with two models. The first is an lmer model that substitutes the observed means $\bar{x}_{.j}$ and $\bar{y}_{.j}$ for the latent intercepts $\alpha_x$ and $\alpha_y$, respectively. The second is our main brms model, specified as follows:
+
+```{r}
+#| include: true
+#| echo: true
+model <- bf(
+  y ~ alphay + betayy*(ylag - alphay) + betayx*(xlag - alphax),
+  alphax + alphay + betayy + betayx ~ 1 + (1 |i| individual),
+  nl = TRUE
+) +
+  gaussian()
+```
+
+Note that this model doesn't estimate an outcome model for $x$, which may or may not have consequences. We then went ahead and ran the simulations with 100 repetitions at each row of the simulation design matrix. This only took a few hours on a M1 laptop. We show results in Figure \@ref(fig:fig-sim-res). First, we see that observed mean centering recovers the specified values of $\alpha_x$ well--those are not in the model output but just means of $\bar{x}_{.j}$. The latent means estimates here are more variable across simulation runs, but also recover the mean well when the number of timepoints is larger than about 10. $\alpha_y$ remains biased upward even with a large number of timepoints per person, but not with the latent means model.
+
+The key coefficients $\beta_1$ and $_2$ show that latent mean centering effectively debiases the autocorrelated parameter, even at low numbers of timepoints. Estimates of $\beta_2$ are noisier across simulation runs but both models seem to recover the values well (observed mean model is consistently greater?)
+
+Other notable findings:
+- The correlation between intercepts (between-person correlation) $\rho$ is massively downward biased?
+- The between-person standard deviations are all over the place.
 
 ```{r}
 # Run simulations
@@ -319,12 +345,6 @@ pop <- tibble(
 )
 
 # Save empty brms model
-model <- bf(
-  y ~ alphay + betayy*(ylag - alphay) + betayx*(xlag - alphax),
-  alphax + alphay + betayy + betayx ~ 1 + (1 |i| individual),
-  nl = TRUE
-) +
-  gaussian()
 p <- prior(normal(0, 1), class = b, coef = Intercept, nlpar = alphax) +
   prior(normal(0, 1), class = b, coef = Intercept, nlpar = alphay) +
   prior(normal(0, 1), class = b, coef = Intercept, nlpar = betayy) +
