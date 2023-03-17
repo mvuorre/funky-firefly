@@ -932,22 +932,6 @@
       "Repository": "CRAN",
       "Hash": "f7736a18de97dea803bde0a2daaafb27"
     },
-    "faux": {
-      "Package": "faux",
-      "Version": "1.2.0",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "R",
-        "dplyr",
-        "ggplot2",
-        "jsonlite",
-        "lme4",
-        "rlang",
-        "truncnorm"
-      ],
-      "Hash": "3645d7bb2043ac310d0937a721edadf6"
-    },
     "fontawesome": {
       "Package": "fontawesome",
       "Version": "0.5.0",
@@ -2711,16 +2695,6 @@
         "xfun"
       ],
       "Hash": "c0f007e2eeed7722ce13d42b84a22e07"
-    },
-    "truncnorm": {
-      "Package": "truncnorm",
-      "Version": "1.0-8",
-      "Source": "Repository",
-      "Repository": "CRAN",
-      "Requirements": [
-        "R"
-      ],
-      "Hash": "cc8b5bfa01c930ccb56d3051e515fbd8"
     },
     "tzdb": {
       "Package": "tzdb",
