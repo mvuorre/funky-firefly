@@ -48,7 +48,9 @@ output:
 ```{r setup, include = FALSE}
 library(papaja)
 library(citr)
+library(parameters)
 library(posterior)
+library(lme4)
 library(knitr)
 library(scales)
 library(ggdist)
@@ -64,12 +66,11 @@ opts_chunk$set(
 # HMC and parallel computation options
 MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
 if (is.na(MAX_CORES)) MAX_CORES <- parallelly::availableCores(logical = FALSE)
-THREADS <- 1
-ITER <- 5000
-CHAINS <- 4
 if (require(cmdstanr)) {
-  options(brms.backend = "cmdstanr")
-  THREADS <- MAX_CORES %/% CHAINS
+  options(
+    brms.backend = "cmdstanr", 
+    brms.threads = MAX_CORES %/% 4
+  )
 }
 
 # Save models in a directory
@@ -206,43 +207,6 @@ summary(fit, prior = TRUE)
 ```
 
 
-# Simulation study
-
-```{r}
-#| label: fig-me-in-means
-#| eval: false
-#| include: false
-#| fig.cap: Illustration of the risks associated with using observed means for group-mean centering, and how those are avoided by using latent means to group-mean center instead.
-
-# A suggestion for an illustrative figure, showing risks (bias) of observed mean centering, but also how latent mean centering avoids them.
-
-tibble(
-  n = seq(1, 100, by = .1),
-  s = 1/sqrt(n)
-  ) %>% 
-  ggplot(aes(n, s)) +
-  scale_y_continuous(
-    "Measurement error in observed mean",
-    limits = 0:1, 
-    breaks = extended_breaks(),
-    expand = expansion(c(.02, .05))
-  ) +
-  scale_x_continuous(
-    "Number of measurements",
-    expand = expansion(.025, .025)
-  ) +
-  # Theoretical measurement error in mean
-  geom_line()
-  # More lines or panels
-  # Observed dynamic panel bias from a simulation
-  # geom_line(something something)
-  # Observed bias in other covariate from a simulation
-  # geom_line(also something something)
-  # Latent mean centering results--lines that are not biased
-  # geom_line(...)
-```
-
-
 # Discussion
 
 R [@rcoreteamLanguageEnvironmentStatistical2022]
@@ -289,98 +253,256 @@ We thank everyone who contributed to this discussion on the Stan discussion boar
 \renewcommand{\thetable}{A\arabic{table}}
 \renewcommand{\thefigure}{A\arabic{figure}}
 
-Hereafter be monsters and dragons
+Hereafter be monsters and dragons.
 
-```{r data-create}
-# Simple simulation scheme
-# happiness predicted from within-person social media use, and happiness(t-1).
-library(MASS)
-library(faux)
-library(lme4)
+Here, we conduct a small simulation study to verify that the proposed estimation method recovers specified parameter values.
 
-# Numbers of people and observations
-n_person <- 50
-n_time <- 5
-# Population level parameters
-beta <- c(
-  4, # Happiness intercept
-  .2, # happy <- social media within
-  .25, # happy <- happy(t-1)
-  30 # Social media intercept
+We simulate data from a bivariate model of $x$ and $y$ measured over $i$ timepoints from 1 to $I$ and for $j$ subjects in 1 to $J$. In this simulation, we set $J = 30$ and vary $I$ from 6 to 60. Both variables are gaussian, with $x$ a simple random variable with a person-varying mean $\alpha_x$, and $y$ is affected by its previous value and the previous value of $x$.
+
+\begin{align*}
+x_{ij} &\sim \operatorname{Normal}(\alpha_{xj}, \sigma^2_x) \\
+y_{ij} &\sim \operatorname{Normal}(
+  \alpha_{yj} +
+  \beta_{1j}(y_{[i-1]j} - \alpha_{yj}) +
+  \beta_{2j}(x_{[i-1]j} - \alpha_{xj}), 
+  \sigma^2_y
+) \\ \\
+\begin{bmatrix} 
+  \alpha_x \\ \alpha_y \\ \beta_1 \\ \beta_2
+\end{bmatrix} &\sim \operatorname{MVN}(
+\begin{bmatrix} 
+  \bar{\alpha}_x \\ \bar{\alpha}_y \\ \bar{\beta}_1 \\ \bar{\beta}_2
+\end{bmatrix}, \mathbf{\Sigma}) \\ \\
+\Sigma &= \mathbf{SRS} \\ \\
+\mathbf{S} &= \begin{bmatrix} 
+  \tau_0 &0 &0 &0 \\ 
+  0 &\tau_1 &0 &0\\ 
+  0 &0 &\tau_2 &0 \\ 
+  0 &0 &0 &\tau_3
+\end{bmatrix} \\ \\
+\mathbf{R} &= 
+\begin{bmatrix} 
+  1 &\rho_{\alpha_x\alpha_y} &\rho_{\alpha_x\beta_1} &\rho_{\alpha_x\beta_2} \\ 
+  \rho_{\alpha_x\alpha_y} &1 &\rho_{\alpha_y\beta_1} &\rho_{\alpha_y\beta_2} \\ 
+  \rho_{\alpha_x\beta_1} &\rho_{\alpha_y\beta_1} &1 &\rho_{\beta_1\beta_2} \\ 
+  \rho_{\alpha_x\beta_2} &\rho_{\alpha_y\beta_2} &\rho_{\beta_1\beta_2} &1 \\
+\end{bmatrix}.
+\end{align*}
+
+```{r}
+# Run simulations
+# Save simulation results to file for every nr_individuals * nr_time
+dir.create("sims", FALSE)
+
+# Load function to simulate data
+source("Generation_Code.r")
+
+# Specify population level parameters
+pop <- tibble(
+  sigma_x = 1.0,
+  sigma_y = 1.0,
+  cor_xy = 0.0,
+  alpha_x = 0.0,
+  alpha_y = 0.0,
+  tau_alpha_x = 0.5,
+  tau_alpha_y = 0.5,
+  cor_alpha = 0.2,
+  beta_yy1 = 0.3,
+  beta_yx = 0.25,
+  beta_xy = 0.0,
+  beta_xx1 = 0.0,
+  tau_beta_yy1 = 0.1,
+  tau_beta_yx = 0.2,
+  tau_beta_xy = 0.0,
+  tau_beta_xx1 = 0.0,
+  cor_beta = 0.0
 )
-names(beta) <- c("b0happy", "b1happy", "b2happy", "b0sm")
-# Standard deviations across people (in same order)
-# Note b3happy is "fixed" (0)
-tau <- c(1, .2, .075, 5)
-# Random effect standard deviations (same for all pairs)
-rho <- .3
-# Standard deviations of observations
-sigma <- c(sigmahappy = 0.5, sigmasm = 5)
 
-# Generate person-level parameters
-x <- rnorm_multi(
-  n = n_person,
-  mu = beta,
-  sd = tau,
-  r = rho,
-  empirical = TRUE
-) %>% 
-  mutate(
-    sigmahappy = sigma[1],
-    sigmasm = sigma[2]
-  )
-
-# Repeate rows and create outcomes
-x <- x %>% 
-  rownames_to_column("person") %>% 
-  crossing(time = 1:n_time) %>% 
-  mutate(
-    sm = rnorm(nrow(.), b0sm, sigmasm),
-    happy = rnorm(nrow(.), b0happy + b1happy*(sm - b0sm), sigmahappy)
-  ) %>% 
-  mutate(
-    happy1 = lag(happy),
-    happy = happy + happy1*b2happy,
-    .by = person
-  )
-
-x <- x %>% 
-  mutate(
-    smb = mean(sm),
-    smw = sm - smb,
-    .by = person
-  )
-y <- lmer(
-  happy ~ smw + happy1 + (smw + happy1 | person),
-  data = x
+# Save empty brms model
+model <- bf(
+  y ~ alphay + betayy*(ylag - alphay) + betayx*(xlag - alphax),
+  alphax + alphay + betayy + betayx ~ 1 + (1 |i| individual),
+  nl = TRUE
+) +
+  gaussian()
+p <- prior(normal(0, 1), class = b, coef = Intercept, nlpar = alphax) +
+  prior(normal(0, 1), class = b, coef = Intercept, nlpar = alphay) +
+  prior(normal(0, 1), class = b, coef = Intercept, nlpar = betayy) +
+  prior(normal(0, 1), class = b, coef = Intercept, nlpar = betayx) +
+  prior(lkj(2), class = cor, group = individual) +
+  prior(student_t(7, 0, 1), class = sd, group = individual, nlpar = alphax) +
+  prior(student_t(7, 0, 1), class = sd, group = individual, nlpar = alphay) +
+  prior(student_t(7, 0, 0.5), class = sd, group = individual, nlpar = betayy) +
+  prior(student_t(7, 0, 0.5), class = sd, group = individual, nlpar = betayx)
+fit_brms_empty <- brm(
+  model,
+  data = simulate_twolevel_data()$data[[1]],
+  prior = p,
+  control = list(adapt_delta = 0.95),
+  chains = 0,
+  file = "models/brm-fit-empty"
 )
+
+# Function to estimate parameters
+simulate_estimate <- function(nr_indiv = 30, nr_time = 10, iter = 2) {
+  path <- str_glue("sims/nr_indiv-{nr_indiv}__nr_time-{nr_time}.rds")
+  if (!file.exists(path)) {
+    
+    library(furrr)
+    plan(multisession, workers = 8)
+    
+    sims <- pop %>% 
+      # Cross design with sample sizes and simulation iterations
+      crossing(
+        nr_indiv = nr_indiv,
+        nr_time = nr_time,
+        i = 1:iter
+      ) %>% 
+      # Generate sets of person level parameters and data
+      mutate(out = pmap(., simulate_twolevel_data)) %>% 
+      unnest(out) %>% 
+      nest(pop_pars = -c(i, nr_indiv, nr_time, indiv_pars, data))
+    
+    sims <- sims %>% 
+      mutate(
+        lmer = future_map(
+          data,
+          ~lmer(y ~ ylag_c + xlag_c + (ylag_c + xlag_c | individual), data = .x) %>% 
+            parameters(effects = "all", group_level = TRUE) %>% 
+            tibble() %>% 
+            suppressMessages() %>% 
+            suppressWarnings()
+        )
+      )
+    
+    sims <- sims %>% 
+      mutate(
+        brms = map(
+          data,
+          ~update(
+            fit_brms_empty, 
+            newdata = .x,
+            cores = MAX_CORES,
+            recompile = FALSE,
+            threads = 2,
+            iter = 2000
+          ) %>% 
+            parameters(centrality = "mean", effects = "all", group_level = TRUE, test = NULL) %>% 
+            tibble()
+        )
+      )
+    
+    saveRDS(sims, path)
+  } else {sims <- readRDS(path)}
+  sims
+}
+
+# Run for specified sample sizes
+sims <- tibble(people = 30, timepoints = c(6, 12, 18, 24, 30, 60)) %>% 
+  mutate(
+    out = map2(people, timepoints, ~simulate_estimate(.x, .y, iter = 100))
+    ) %>% 
+  unnest(out)
 ```
 
 ```{r}
-model <- bf(
-  happy ~ b0happy + b1happy*(happy1 - b0happy) + b2happy*(sm - b0sm),
-  b0happy ~ 1 + (1 | person),
-  b1happy ~ 1 + (1 | person),
-  b2happy ~ 1 + (1 | person),
-  b0sm ~ 1 + (1 | person),
-  nl = TRUE,
-  center = FALSE
-) +
-  gaussian()
+#| label: fig-sim-res
+#| fig-cap: Simulation study results. Each panel displays the mean posterior mean calculated over 100 iterations of model fitting. Vertical bars indicate standard errors over those 100 simulation runs. Each panel is labelled with a parameter name corresponding to the above equations. 
+#| fig-width: 7
 
-# Set priors
-p <- prior(normal(30, 15), class = b, coef = Intercept, nlpar = b0sm)
-
-fit <- brm(
-  model,
-  data = d,
-  prior = p,
-  cores = MAX_CORES,
-  threads = THREADS,
-  iter = ITER,
-  control = list(adapt_delta = 0.99),
-  file = "models/brm-fit-1"
-)
-summary(fit, prior = TRUE)
+tmp <- sims %>% 
+  mutate(
+    result = pmap(
+      list(lmer, brms, data),
+      ~bind_rows(
+        # Wrangle lmer results
+        ..1 %>% 
+          filter(Effects == "fixed") %>% 
+          mutate(
+            Parameter = fct_recode(
+              Parameter, 
+              `alpha[y]` = "(Intercept)",
+              `beta[1]` = "ylag_c",
+              `beta[2]` = "xlag_c"
+            ),
+            Centering = "Observed (lmer)"
+          ),
+        # Wrangle brms results
+        ..2 %>% 
+          filter(str_starts(Parameter, "b_|sd_|cor_|sigma")) %>% 
+          mutate(
+            Parameter = fct_recode(
+              Parameter, 
+              `alpha[x]` = "b_alphax_Intercept",
+              `alpha[y]` = "b_alphay_Intercept",
+              `beta[1]` = "b_betayy_Intercept",
+              `beta[2]` = "b_betayx_Intercept",
+              `tau[alpha[x]]` = "sd_individual__alphax_Intercept",
+              `tau[alpha[y]]` = "sd_individual__alphay_Intercept",
+              `tau[beta[1]]` = "sd_individual__betayy_Intercept",
+              `tau[beta[2]]` = "sd_individual__betayx_Intercept",
+              `rho[alpha[x]~alpha[y]]` = "cor_individual__alphax_Intercept__alphay_Intercept",
+              `sigma[y]` = "sigma"
+            )
+          ) %>% 
+          filter(!str_starts(Parameter, "cor_i")) %>% 
+          mutate(Centering = "Latent (brms)") %>% 
+          rename(Coefficient = Mean),
+      ) %>% 
+        bind_rows(
+          # Observed mean of X
+          ..3 %>% 
+            summarise(Parameter = "alpha[x]", Coefficient = mean(x_b), Centering = "Observed (lmer)")
+        )
+    )
+  ) %>% 
+  select(1:4, result) %>% 
+  unnest(result)
+tmp %>%   
+  ggplot(aes(nr_time, Coefficient, col = Centering, fill = Centering)) +
+  scale_x_continuous(
+    "Number of timepoints per person",
+    breaks = extended_breaks()
+  ) +
+  scale_y_continuous(
+    "Posterior mean",
+    breaks = extended_breaks(),
+    expand = expansion(.5)
+  ) +
+  geom_hline(
+    data = pop %>% 
+      select(
+        `alpha[x]` = alpha_x, 
+        `alpha[y]` = alpha_y, 
+        `beta[1]` = beta_yy1, 
+        `beta[2]` = beta_yx, 
+        `tau[alpha[x]]` = tau_alpha_x, 
+        `tau[alpha[y]]` = tau_alpha_y,
+        `tau[beta[1]]` = tau_beta_yy1, 
+        `tau[beta[2]]` = tau_beta_yx,
+        `rho[alpha[x]~alpha[y]]` = cor_alpha, 
+        `sigma[y]` = sigma_y
+      ) %>% 
+      pivot_longer(everything(), names_to = "Parameter", values_to = "Coefficient"),
+    aes(yintercept = Coefficient),
+    linewidth = .15
+  ) +
+  stat_summary(
+    geom = "line", position = position_dodge(width = 2),
+    fun = "mean", linewidth = .33
+  ) +
+  stat_summary(
+    geom = "pointrange", position = position_dodge(width = 2),
+    fun.data = "mean_se", fatten = 1.5, linewidth = .25
+  ) +
+  facet_wrap(
+    "Parameter",
+    nrow = 2,
+    scales = "free_y",
+    labeller = label_parsed
+  ) +
+  theme(
+    legend.position = "bottom",
+    strip.text = element_text(size = rel(1.1))
+    )
 ```
-
