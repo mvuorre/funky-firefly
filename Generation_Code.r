@@ -182,10 +182,12 @@ simulate_twolevel_data <- function(
       .by = individual
     )
   
+  # Also save person-level parameters in a tibble
   coefs <- cbind(alphas, betas[,,1], betas[,,2]) %>% 
     as_tibble() %>% 
     set_names(c("alpha_y", "alpha_x", "beta_yy1", "beta_xy", "beta_yx", "beta_xx1"))
   
+  # Return both person-parameters and generated data in a tibble with list-columns
   tibble(indiv_pars = list(coefs), data = list(data_tot))
   
 }
