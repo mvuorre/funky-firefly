@@ -1,0 +1,104 @@
+---
+title: "latent-mean-center-mlm"
+author: "Ethan M. McCormick"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#| warning: false
+#| message: false
+#| include: false
+
+packages <- c("dplyr", "lmerTest", "brms")
+invisible(lapply(packages, library, character.only = TRUE))
+if (require(cmdstanr)) {
+  options(brms.backend = "cmdstanr")
+}
+```
+
+```{r}
+btDat <- read.csv("~/Dropbox/Professional/projects/longitudinal-primer/codebook/data/feedback-learning.csv") %>%
+  mutate(wave = wave - 2,
+         age = (age - mean(age, na.rm = TRUE)) / sd(age, na.rm = TRUE),
+         age2 = age^2) %>%
+  group_by(id) %>%
+  mutate(modul_id_mcent = modularity - mean(modularity, na.rm = TRUE),
+         modul_id_mean = mean(modularity, na.rm = TRUE))
+```
+
+```{r}
+lmer.fit <- lmer(learning.rate ~ age + age2 + 
+                   modul_id_mcent + modul_id_mean + (1 | id),
+                 data = btDat)
+
+summary(lmer.fit)
+```
+
+```{r}
+model <- bf(
+  learning.rate ~ 1 + age + age2 + modul_id_mcent + modul_id_mean + (1 | id),
+  #age + age2 + beta + beta2 ~ 1,
+  nl = F
+) +
+  gaussian()
+
+p <- get_prior(model, data = btDat) %>%
+  mutate(
+    prior = case_when(
+      class == "b" & coef == "Intercept" ~ "normal(0, 1.5)",
+      class == "sd" & coef == "Intercept" ~ "student_t(7, 0, 1)",
+      TRUE ~ prior
+    )
+  )
+
+job::job({fit1 <- brm(
+  model,
+  data = btDat,
+  prior = p,
+  cores = round(parallel::detectCores(logical = FALSE) %/% 2),
+  iter = 10000,
+  control = list(adapt_delta = 0.99),
+  file = "models/braintime-fixed"
+)})
+summary(fit1)
+```
+
+```{r}
+model <- bf(
+  learning.rate ~ alpha + b1*age + b2*age2 + b3*(modularity - modC),
+  alpha ~ 1 + (1 |id),
+  b1 + b2 + b3 ~ 1,
+  nlf(modC ~ modCi),
+  modCi ~ 1 + (1 | id),
+  nl = TRUE
+) +
+  gaussian()
+
+p <- get_prior(model, data = btDat) %>%
+  mutate(
+    prior = case_when(
+      class == "b" & coef == "Intercept" ~ "normal(0, 1.5)",
+      class == "sd" & coef == "Intercept" ~ "student_t(7, 0, 1)",
+      TRUE ~ prior
+    )
+  )
+
+job::job({fit2 <- brm(
+  model,
+  data = btDat,
+  prior = p,
+  cores = round(parallel::detectCores(logical = FALSE) %/% 2),
+  iter = 10000,
+  control = list(adapt_delta = 0.99),
+  file = "models/braintime-lmc"
+)})
+summary(fit2)
+```
+
+
+
