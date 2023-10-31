@@ -94,7 +94,7 @@ $$
 Here's code to do that. We set the values first, and J=30, I=20.
 
 ```{r}
-sim1 <- function(...) {
+sim1 <- function(..., n_person = 30, n_time = 20) {
   # Population level effects
   beta <- c(0, 0, .5)
   beta_4 <- -0.5
@@ -107,10 +107,6 @@ sim1 <- function(...) {
   S <- diag(length(sd))
   S[lower.tri(S)] <- S[upper.tri(S)] <- cor
   S <- diag(sd) %*% S %*% diag(sd)
-  
-  # Simulation parameters
-  n_person <- 30
-  n_time <- 20
   
   # Person-specific deviations
   u <- mvrnorm(n_person, beta, S) %>% 
@@ -167,34 +163,126 @@ x2 <- lmer(y ~ xc + xb + (xc | person), data = d1)
 parameters(x2) %>% tibble() %>% kable(digits = 2)
 ```
 
-We then run this simulation 100 times, and estimate the latent variable brms model, and observed variable lmer model.
+Try a fit
 
 ```{r}
-# Save empty brms model
+dat <- sim1(n_person = 30, n_time = 20) %>% 
+  mutate(beta11 = 0)
+
+# With equality
 model <- bf(
   y ~ beta2 + beta3*(x - beta1) + beta4*beta1,
   beta1 + beta2 + beta3 ~ 1 + (1 |i| person),
   beta4 ~ 1,
   nl = TRUE
 ) +
-  gaussian()
-p <- prior(normal(0, 1), class = b, nlpar = beta1) +
-  prior(normal(0, 1), class = b, nlpar = beta2) +
-  prior(normal(0, 1), class = b, nlpar = beta3) +
-  prior(normal(0, 1), class = b, nlpar = beta4) +
-  prior(lkj(2), class = cor, group = person) +
-  prior(student_t(7, 0, 1), class = sd, group = person, nlpar = beta1) +
-  prior(student_t(7, 0, 1), class = sd, group = person, nlpar = beta2) +
-  prior(student_t(7, 0, 1), class = sd, group = person, nlpar = beta3)
-fit_brms_empty <- brm(
+  bf(
+    x ~ beta11,
+    beta11 ~ 1 + (1 |i| person),
+    nl = TRUE
+  ) +
+  nlf(beta1 ~ beta11, resp = "y") +
+  gaussian() +
+  set_rescor(FALSE)
+p <- get_prior(model, dat) %>% 
+  mutate(prior = if_else(class=="b", "normal(0, 1)", prior))
+make_stancode(model, dat, prior = p, backend = "rstan")
+fit <- brm(
   model,
-  data = d1,
+  dat,
   prior = p,
+  cores = 8, iter = 1000, threads = 2, backend = "cmdstanr"
+)
+summary(fit)
+
+# Without
+model2 <- bf(
+  y ~ beta2 + beta3*(x - beta1) + beta4*beta1,
+  beta1 + beta2 + beta3 ~ 1 + (1 |i| person),
+  beta4 ~ 1,
+  nl = TRUE
+) +
+  gaussian()
+p2 <- get_prior(model2, dat) %>% 
+  mutate(prior = if_else(class=="b", "normal(0, 1)", prior))
+
+fit2 <- brm(
+  model2,
+  dat,
+  prior = p2,
+  cores = 8, iter = 1000, threads = 2, backend = "cmdstanr"
+)
+summary(fit2)
+
+stancode(fit)
+```
+
+
+We then run this simulation 100 times, and estimate the latent variable brms model, and observed variable lmer model.
+
+```{r}
+# Save empty brms models
+model1 <- bf(
+  y ~ beta2 + beta3*(x - beta1) + beta4*beta1,
+  beta1 + beta2 + beta3 ~ 1 + (1 |i| person),
+  beta4 ~ 1,
+  nl = TRUE
+) +
+  gaussian()
+p1 <- get_prior(model1, d1) %>% 
+  mutate(
+    prior = case_when(
+      class == "b" ~ "normal(0, 1)",
+      class == "sd" ~ "student_t(7, 0, 1)",
+      class == "cor" ~ "lkj(2)",
+      TRUE ~ prior
+    )
+  )
+
+model1_fit_empty <- brm(
+  model1,
+  data = d1,
+  prior = p1,
   control = list(adapt_delta = 0.95),
   chains = 0,
   threads = 2,
   backend = "cmdstanr",
-  file = "models/brm-simulation-1-empty"
+  file = "models/brm-simulation-model1-empty"
+)
+
+model2 <- bf(
+  y ~ beta2 + beta3*(x - beta1) + beta4*beta1,
+  beta1 + beta2 + beta3 ~ 1 + (1 |i| person),
+  beta4 ~ 1,
+  nl = TRUE
+) +
+  bf(
+    x ~ beta11,
+    beta11 ~ 1 + (1 |i| person),
+    nl = TRUE
+  ) +
+  nlf(beta1 ~ beta11, resp = "y") +
+  gaussian() +
+  set_rescor(FALSE)
+p2 <- get_prior(model2, d1 %>% mutate(beta11 = 0)) %>% 
+  mutate(
+    prior = case_when(
+      class == "b" ~ "normal(0, 1)",
+      class == "sd" ~ "student_t(7, 0, 1)",
+      class == "cor" ~ "lkj(2)",
+      TRUE ~ prior
+    )
+  )
+
+model2_fit_empty <- brm(
+  model2,
+  d1 %>% mutate(beta11 = 0),
+  prior = p2,
+  control = list(adapt_delta = 0.95),
+  chains = 0,
+  threads = 2,
+  backend = "cmdstanr",
+  file = "models/brm-simulation-model2-empty"
 )
 
 # Run simulation
@@ -203,10 +291,10 @@ if (!file.exists(path)) {
   sims <- tibble(n = 1:100) %>% 
     mutate(
       data = map(n, sim1),
-      brms = map(
+      brms1 = map(
         data,
         ~update(
-          fit_brms_empty, 
+          model1_fit_empty, 
           newdata = .x,
           recompile = FALSE,
           control = list(adapt_delta = 0.95),
@@ -214,9 +302,27 @@ if (!file.exists(path)) {
           chains = 4,
           cores = 8,
           threads = 2,
+          refresh = 0,
           backend = "cmdstanr"
         ) %>% 
           parameters(centrality = "mean", effects = "all", test = NULL) %>% 
+          tibble()
+      ),
+      brms2 = map(
+        data,
+        ~update(
+          model2_fit_empty, 
+          newdata = .x %>% mutate(beta11 = 0),
+          recompile = FALSE,
+          control = list(adapt_delta = 0.95),
+          iter = 2400,
+          chains = 4,
+          cores = 8,
+          threads = 2,
+          refresh = 0,
+          backend = "cmdstanr"
+        ) %>% 
+          parameters(centrality = "mean", test = NULL) %>% 
           tibble()
       ),
       lmer = map(
@@ -240,17 +346,17 @@ truth <- tibble(
   beta_1 = 0,
   beta_2 = 0,
   beta_3 = .5,
-  beta_4 = -.5,
-  sd_1 = 1,
-  sd_2 = 1,
-  sd_3 = .5
+  beta_4 = -.5
+  # sd_1 = 1,
+  # sd_2 = 1,
+  # sd_3 = .5
 ) %>% 
   pivot_longer(everything(), names_to = "Parameter")
 out <- sims %>% 
   select(-data) %>% 
   mutate(
-    brms = map(
-      brms,
+    brms1 = map(
+      brms1,
       ~mutate(
         .x,
         Parameter = case_match(
@@ -259,9 +365,27 @@ out <- sims %>%
           "b_beta2_Intercept" ~ "beta_2",
           "b_beta3_Intercept" ~ "beta_3",
           "b_beta4_Intercept" ~ "beta_4",
-          "sd_person__beta1_Intercept" ~ "sd_1",
-          "sd_person__beta2_Intercept" ~ "sd_2",
-          "sd_person__beta3_Intercept" ~ "sd_3",
+          # "sd_person__beta1_Intercept" ~ "sd_1",
+          # "sd_person__beta2_Intercept" ~ "sd_2",
+          # "sd_person__beta3_Intercept" ~ "sd_3",
+        )
+      ) %>% 
+        drop_na(Parameter) %>% 
+        rename(Coefficient = Mean)
+    ),
+    brms2 = map(
+      brms2,
+      ~mutate(
+        .x,
+        Parameter = case_match(
+          Parameter,
+          "b_x_beta11_Intercept" ~ "beta_1",
+          "b_y_beta2_Intercept" ~ "beta_2",
+          "b_y_beta3_Intercept" ~ "beta_3",
+          "b_y_beta4_Intercept" ~ "beta_4",
+          # "sd_person__beta1_Intercept" ~ "sd_1",
+          # "sd_person__beta2_Intercept" ~ "sd_2",
+          # "sd_person__beta3_Intercept" ~ "sd_3",
         )
       ) %>% 
         drop_na(Parameter) %>% 
@@ -276,21 +400,21 @@ out <- sims %>%
           "(Intercept)" ~ "beta_2",
           "xc" ~ "beta_3",
           "xb" ~ "beta_4",
-          "SD (Intercept)" ~ "sd_2",
-          "SD (xc)" ~ "sd_3"
+          # "SD (Intercept)" ~ "sd_2",
+          # "SD (xc)" ~ "sd_3"
         )
       ) %>% 
         drop_na(Parameter)
     )
   ) %>% 
-  pivot_longer(c(brms, lmer)) %>% 
+  pivot_longer(c(brms1, brms2, lmer)) %>% 
   unnest(value)
   
 out %>% 
   ggplot(aes(name, Coefficient)) +
   scale_x_discrete(
-    breaks = c("brms", "lmer"),
-    labels = c("brms\n(latent\ncentering)", "lmer\n(observed\ncentering)")
+    breaks = c("brms1", "brms2", "lmer"),
+    # labels = c("brms\n(latent\ncentering)", "lmer\n(observed\ncentering)")
   ) +
   scale_y_continuous(
     "Estimated coefficient"
@@ -307,10 +431,11 @@ out %>%
       c("beta_1" = "X Intercept",
         "beta_2" = "Y Intercept",
         "beta_3" = "Y on X (within)",
-        "beta_4" = "Y on X (between)",
-        "sd_1" = "sd(X Intercept)",
-        "sd_2" = "sd(Y Intercept)",
-        "sd_3" = "sd(Y on X [within])")
+        "beta_4" = "Y on X (between)"
+        # "sd_1" = "sd(X Intercept)",
+        # "sd_2" = "sd(Y Intercept)",
+        # "sd_3" = "sd(Y on X [within])"
+      )
     )
   ) +
   theme(
