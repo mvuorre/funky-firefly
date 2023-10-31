@@ -70,3 +70,5 @@ generated quantities {
   alpha_scale_raw = sdY * alpha_scale;
   sigma_raw = sigma * sdY;
 }
+
+
