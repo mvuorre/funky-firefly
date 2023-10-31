@@ -49,8 +49,8 @@ We first set up the data simulation. I used [this code](https://experienced-samp
 #'
 #' @examples simulate()
 simulate <- function(
-    I = 100, 
-    t = 50, 
+    I = 50, 
+    t = 25, 
     sigma = 1, 
     alpha_hat = 4, 
     alpha_scale = 1, 
@@ -136,22 +136,65 @@ dat <- simulate()
 glimpse(simulate())
 ```
 
+## Stan model
+
 Let us then compile and sample from the cmdstanr model
 
 ```{r}
-model <- cmdstanr::cmdstan_model("model-ar1.stan", compile = FALSE)
-model$format(
-  canonicalize = list("deprecations"), 
-  overwrite_file = TRUE, 
-  backup = FALSE
-)
-model$compile()
-fit <- model$sample(
+# model <- cmdstan_model("model-ar1.stan", compile = FALSE)
+# model$format(
+#   canonicalize = list("deprecations"), 
+#   overwrite_file = TRUE, 
+#   backup = FALSE
+# )
+# model$compile()
+model <- cmdstan_model(exe_file = "model-ar1")
+path <- "models/cmdstanr-example.rds"
+if (!file.exists(path)) {
+post <- model$sample(
   data = dat, 
   adapt_delta = 0.99
-)
+) |> 
+  as_draws_df()
+saveRDS(post, path)
+} else {post <- readRDS(path)}
 ```
 
+Visualize estimated and defined parameters
+
 ```{r}
-as_draws_df(fit)
+post <- post |> 
+  select(starts_with("beta_"), ends_with("_raw")) |> 
+  rename_with(~str_remove(., "_raw"))
+post |> 
+  pivot_longer(everything()) |> 
+  ggplot(aes(value, name)) +
+  scale_x_continuous(
+    "Parameter value"
+  ) +
+  stat_histinterval(
+    normalize = "xy",
+    scale = 0.25, 
+    size = 1
+  ) +
+  geom_point(
+    data = as_tibble(dat) |> 
+      select(sigma:beta_scale) |> 
+      distinct() |> 
+      pivot_longer(everything()),
+    position = position_nudge(y = -0.1),
+    color = "red"
+  ) +
+  theme(
+    axis.title.y = element_blank()
+  )
+```
+
+## brms
+
+```{r}
+dat <- as_tibble(dat)
+dat <- dat |> 
+  mutate(yt1 = lag(y), .by = individual)
+dat
 ```
