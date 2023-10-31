@@ -49,8 +49,8 @@ We first set up the data simulation. I used [this code](https://experienced-samp
 #'
 #' @examples simulate()
 simulate <- function(
-    I = 30, 
-    t = 10, 
+    I = 100, 
+    t = 50, 
     sigma = 1, 
     alpha_hat = 4, 
     alpha_scale = 1, 
@@ -139,10 +139,19 @@ glimpse(simulate())
 Let us then compile and sample from the cmdstanr model
 
 ```{r}
-fit <- cmdstanr::cmdstan_model("model-ar1.stan", compile = FALSE)
-fit$format(
+model <- cmdstanr::cmdstan_model("model-ar1.stan", compile = FALSE)
+model$format(
   canonicalize = list("deprecations"), 
   overwrite_file = TRUE, 
   backup = FALSE
 )
+model$compile()
+fit <- model$sample(
+  data = dat, 
+  adapt_delta = 0.99
+)
+```
+
+```{r}
+as_draws_df(fit)
 ```
