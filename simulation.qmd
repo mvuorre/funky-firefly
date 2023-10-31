@@ -13,6 +13,7 @@ format:
 
 library(posterior)
 library(mvtnorm)
+library(cmdstanr)
 library(ggdist)
 library(brms)
 library(tidyverse)
@@ -133,4 +134,15 @@ The function returns a list that we can pass to Stan. It also contains the data 
 set.seed(31121)
 dat <- simulate()
 glimpse(simulate())
+```
+
+Let us then compile and sample from the cmdstanr model
+
+```{r}
+fit <- cmdstanr::cmdstan_model("model-ar1.stan", compile = FALSE)
+fit$format(
+  canonicalize = list("deprecations"), 
+  overwrite_file = TRUE, 
+  backup = FALSE
+)
 ```
