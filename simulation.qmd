@@ -1,12 +1,31 @@
 ---
-title: "Simulation"
+title: "Simulations"
+subtitle: "Specification and simulation of brms latent means model"
+authors:
+  - name: Matti Vuorre
+    email: mjvuorre@uvt.nl
+    url: https://vuorre.com
+    orcid: 0000-0001-5052-066X
+    affiliation:
+      - ref: 1
+  - name: Joran Jongerling
+    orcid: 0000-0001-5697-1381
+    affiliation:
+      - ref: 1
+affiliations:
+  - id: 1
+    name: Tilburg University
 execute: 
   cache: true
+  error: true
 format: 
   html:
+    theme: materia
     toc: true
     code-fold: true
 ---
+
+Here we simulate from, specify, and validate latent means models with brms.
 
 ```{r}
 #| label: options
@@ -26,11 +45,13 @@ options(
 )
 ```
 
-In this document we specify, simulate, and validate a univariate latent means brms model. Code based on Joran's blog post at <https://experienced-sampler.netlify.app/post/stan-hierarchical-ar/>.
+# Univariate model
 
-# Data
+The data simulation and Stan code here is based on [Joran's blog post](https://experienced-sampler.netlify.app/post/stan-hierarchical-ar/).
 
-We first set up the data simulation. I used [this code](https://experienced-sampler.netlify.app/post/stan-hierarchical-ar/#testing) but put it inside a function.
+## Data
+
+We first set up the data simulation.
 
 ```{r}
 #' Simulate ar(1) data
@@ -136,7 +157,7 @@ dat <- simulate()
 glimpse(simulate())
 ```
 
-## Stan model
+### Stan model
 
 Let us then compile and sample from the cmdstanr model
 
@@ -190,7 +211,7 @@ post_cmdstanr |>
   )
 ```
 
-## brms
+### brms
 
 ```{r}
 dat <- as_tibble(dat)
@@ -298,6 +319,6 @@ bind_rows(
   facet_wrap("name", scales = "free", ncol = 2)
 ```
 
-# Next
+# Multivariate model
 
 Next problem is to generalize this to the multivariate situation where we have some (e.g.) X[t-1] predicting Y[t]. to be continued...
