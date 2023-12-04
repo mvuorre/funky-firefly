@@ -1,39 +1,25 @@
 ---
-title: "Simulations"
-subtitle: "Specification and simulation of brms latent means model"
-authors:
-  - name: Matti Vuorre
-    email: mjvuorre@uvt.nl
-    url: https://vuorre.com
-    orcid: 0000-0001-5052-066X
-    affiliation:
-      - ref: 1
-  - name: Joran Jongerling
-    orcid: 0000-0001-5697-1381
-    affiliation:
-      - ref: 1
-affiliations:
-  - id: 1
-    name: Tilburg University
+title: Simulation
+subtitle: Specification and parameter recovery simulation of brms latent means model
 execute: 
-  cache: true
   error: true
-format: 
-  html:
-    theme: materia
-    toc: true
-    code-fold: true
+  message: false
+  warning: false
 ---
 
 Here we simulate from, specify, and validate latent means models with brms.
 
-```{r}
+```{r echo = FALSE}
 #| label: options
+#| output: false
 
 library(posterior)
 library(mvtnorm)
+library(scales)
+library(gt)
 library(cmdstanr)
 library(ggdist)
+library(future)
 library(brms)
 library(tidyverse)
 
@@ -45,11 +31,19 @@ options(
 )
 ```
 
-# Univariate model
+## Univariate model
 
 The data simulation and Stan code here is based on [Joran's blog post](https://experienced-sampler.netlify.app/post/stan-hierarchical-ar/).
 
-## Data
+The model is for each individual i and timepoint t,
+
+y_it ~ normal(eta_it, sigma)
+eta_it = (alpha_hat + alpha_i) + (beta_hat + beta_i) * (y_i[t-1])
+[alpha_i, beta_i] ~ mvn([0, 0], Sigma)
+
+That is we model y on an intercept and an autoregressive coefficient with varying intercepts and slopes over people.
+
+### Data
 
 We first set up the data simulation.
 
@@ -157,113 +151,86 @@ dat <- simulate()
 glimpse(simulate())
 ```
 
-### Stan model
+### Stan
 
-Let us then compile and sample from the cmdstanr model
+Let us then compile and sample from the Stan model (`model-ar1.stan`) with cmdstanr
 
 ```{r}
-# model <- cmdstan_model("model-ar1.stan", compile = FALSE)
-# model$format(
-#   canonicalize = list("deprecations"), 
-#   overwrite_file = TRUE, 
-#   backup = FALSE
-# )
-# model$compile()
-model <- cmdstan_model(exe_file = "model-ar1")
-path <- "models/cmdstanr-example.rds"
+#| output: false
+
+path <- "cache/cmdstanr-example.rds"
 if (!file.exists(path)) {
-post <- model$sample(
-  data = dat, 
-  adapt_delta = 0.99
-) |> 
-  as_draws_df()
-saveRDS(post, path)
-} else {post_cmdstanr <- readRDS(path)}
+  model <- cmdstan_model("model-ar1.stan", compile = FALSE)
+  model$format(
+    canonicalize = list("deprecations"),
+    overwrite_file = TRUE,
+    backup = FALSE
+  )
+  model$compile()
+  post_cmdstanr <- model$sample(
+    data = dat, 
+    adapt_delta = 0.99
+  ) |> 
+    as_draws_df()
+  saveRDS(post_cmdstanr, path)
+} else {
+  post_cmdstanr <- readRDS(path)
+}
 ```
 
-Visualize estimated and defined parameters
+Posterior summary:
 
 ```{r}
 post_cmdstanr <- post_cmdstanr |> 
-  select(starts_with("beta_"), ends_with("_raw")) |> 
+  select(
+    alpha_hat_raw, alpha_scale_raw, 
+    beta_hat, beta_scale, 
+    sigma_raw
+  ) |> 
   rename_with(~str_remove(., "_raw"))
-post_cmdstanr |> 
-  pivot_longer(everything()) |> 
-  ggplot(aes(value, name)) +
-  scale_x_continuous(
-    "Parameter value"
-  ) +
-  stat_histinterval(
-    normalize = "xy",
-    scale = 0.25, 
-    size = 1
-  ) +
-  geom_point(
-    data = as_tibble(dat) |> 
-      select(sigma:beta_scale) |> 
-      distinct() |> 
-      pivot_longer(everything()),
-    position = position_nudge(y = -0.1),
-    color = "red"
-  ) +
-  theme(
-    axis.title.y = element_blank()
-  )
+
+summarize_draws(post_cmdstanr) |> 
+  gt() |> 
+  fmt_number(decimals = 2)
 ```
 
 ### brms
+
+brms takes a data frame, so we convert the list here
 
 ```{r}
 dat <- as_tibble(dat)
 dat <- dat |> 
   mutate(yt1 = lag(y), .by = individual)
-head(dat)
+head(dat) |> 
+  gt() |> 
+  fmt_number(decimals = 2)
 ```
 
-We specify the model as a missing data model as follows
+#### Model specification
+
+We can specify this model using brms' nonlinear formulas. Note that we created the `yt1` variable (i.e. y[t-1]) above.
 
 ```{r}
-bform <- bf(y | mi() ~ -1 + mi(mean) + b2*(yt1 - mi(mean))) + 
-  bf(mean | mi() ~ 1 + (1 | individual))
-fit <- brm(
-  bform,
-  data = dat
-)
-```
+#| output: false
 
-However this needs some brms syntax edits. We also change the parameter names to fit the blog post
-
-```{r}
-bform <- bf(
-  y | mi() ~ 0 + mi(alpha) + beta * (yt1 - mi(alpha)),
-  alpha | mi() ~ 1 + (1 | individual),
-  beta ~ 1,
-  nl = TRUE
-)
-fit <- brm(
-  bform,
-  data = dat
-)
-```
-
-```{r}
 bform <- bf(
   y ~ 0 + alpha + beta * (yt1 - alpha),
   alpha ~ 1 + (1 | individual),
   beta ~ 1 + (1 | individual),
   nl = TRUE
 )
-fit <- brm(
+fit_brms <- brm(
   bform,
   data = dat,
-  file = "models/brm-example.rds"
+  file = "cache/brm-example.rds"
 )
 ```
 
-Visualize estimated and defined parameters
+We see that the estimated parameters are very close to coefficients from the Stan model
 
 ```{r}
-post_brms <- as_draws_df(fit) |> 
+post_brms <- as_draws_df(fit_brms) |> 
   select(
     alpha_hat = b_alpha_Intercept,
     alpha_scale = sd_individual__alpha_Intercept,
@@ -273,52 +240,132 @@ post_brms <- as_draws_df(fit) |>
   )
 
 bind_rows(
-  "Stan" = post_cmdstanr |> 
-  pivot_longer(everything()),
-  "brms" = post_brms |> 
-  pivot_longer(everything()),
+  "Stan" = summarize_draws(post_cmdstanr),
+  "brms" = summarize_draws(post_brms),
   .id = "Model"
 ) |> 
-  mutate(side = if_else(Model == "Stan", "bottom", "top")) |> 
-  ggplot(aes(value, name)) +
-  scale_x_continuous(
-    "Parameter value"
-  ) +
-  scale_color_brewer(
-    palette = "Dark2",
-    aesthetics = c("color", "fill")
-  ) +
-  stat_histinterval(
-    aes(side = side, fill = Model, color = Model),
-    normalize = "xy",
-    scale = 0.5, 
-    size = 1,
-    breaks = 100,
-    slab_alpha = 0.5
-  ) +
-  geom_point(
-    data = as_tibble(dat) |> 
-      select(sigma:beta_scale) |> 
-      distinct() |> 
-      pivot_longer(everything()),
-    aes(color = "Real value", fill = "Real value"),
-    size = 2
-  ) +
-  theme_linedraw() +
-  theme(
-    axis.title.y = element_blank()
-  ) +
-  labs(
-    title = str_glue(
-      "bf(y ~ 0 + alpha + beta * (yt1 - alpha),
-          alpha ~ 1 + (1 | individual),
-          beta ~ 1 + (1 | individual),
-          nl = TRUE)"
-    )
-  ) +
-  facet_wrap("name", scales = "free", ncol = 2)
+  arrange(variable, Model) |> 
+  gt() |> 
+  fmt_number(decimals = 2)
 ```
 
-# Multivariate model
+### Simulation
 
-Next problem is to generalize this to the multivariate situation where we have some (e.g.) X[t-1] predicting Y[t]. to be continued...
+Above, we estimated the Stan and brms models once. Here, we evaluate whether they recover the specified parameters with a small simulation.
+
+```{r}
+path <- "cache/sim-univariate.rds"
+if (!file.exists(path)) {
+  # Ensure that models are compiled
+  model_stan <- cmdstan_model("model-ar1.stan", compile = TRUE)
+  fit_brms <- brm(
+    bform,
+    data = dat,
+    chains = 0,
+    threads = 1
+  )
+  
+  # Define simulation outputs
+  K <- 30
+  out <- vector("list", length = K)
+  
+  # Parallelization scheme:
+  # Each of two workers will launch a session that runs 4 chains in parallel
+  # resulting in total 8 cores used
+  plan(multisession, workers = 2)
+  
+  for (k in 1:K) {
+    this_sample <- simulate()
+    
+    this_stan <- future({
+      model_stan$sample(
+        data = this_sample, 
+        adapt_delta = 0.99, 
+        parallel_chains = 4,
+        iter_sampling = 2000,
+        refresh = 0, 
+        show_messages = FALSE
+      )
+    }, seed = TRUE)
+    
+    this_brms <- future({
+      update(
+        fit_brms, 
+        newdata = as_tibble(this_sample) |> 
+          mutate(yt1 = lag(y), .by = individual),
+        control = list(adapt_delta = 0.99),
+        cores = 4,
+        iter = 2000,
+        recompile = FALSE,
+        refresh = 0,
+        silent = 2
+      )
+    }, seed = TRUE)
+    
+    this_stan <- value(this_stan) 
+    this_stan <- this_stan |> 
+      as_draws_df() |> 
+      select(
+        alpha_hat_raw, alpha_scale_raw, 
+        beta_hat, beta_scale, 
+        sigma_raw
+      ) |> 
+      rename_with(~str_remove(., "_raw")) |> 
+      summarize_draws()
+    
+    this_brms <- value(this_brms) 
+    this_brms <- this_brms |> 
+      as_draws_df() |> 
+      select(
+        alpha_hat = b_alpha_Intercept,
+        alpha_scale = sd_individual__alpha_Intercept,
+        beta_hat = b_beta_Intercept,
+        beta_scale = sd_individual__beta_Intercept,
+        sigma
+      ) |> 
+      summarize_draws()
+    
+    out[[k]] <- bind_rows(
+      "Stan" = this_stan,
+      "brms" = this_brms,
+      .id = "model"
+    )
+  }
+  
+  out <- bind_rows(out, .id = "k")
+  saveRDS(out, path)
+} else {out <- readRDS(path)}
+```
+
+#### Results
+
+```{r}
+#| label: tbl-simulation
+
+real_values <- tribble(
+  ~variable, ~true,
+  "sigma", 1, 
+  "alpha_hat", 4, 
+  "alpha_scale", 1, 
+  "beta_hat", 0.4, 
+  "beta_scale", 0.1
+)
+out |> 
+  summarise(
+    mean = str_glue("{number(mean(mean), .01)} ({number(sd(mean), .01)})"),
+    .by = c(model, variable)
+  ) |> 
+  pivot_wider(
+    names_from = model, values_from = mean
+  ) |> 
+  left_join(
+    real_values
+  ) |> 
+  gt() |> 
+  fmt_number(decimals = 1) |> 
+  fmt_missing(missing_text = " ")
+```
+
+## Conclusion
+
+This small simulation shows that brms perfectly recovers parameters of a simple univariate autoregressive latent variable model. The mean estimates over 30 simulation iterations were identical for brms and Stan to the second significant digit, and within MCSE of the true values.

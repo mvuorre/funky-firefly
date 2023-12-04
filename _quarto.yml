@@ -1,0 +1,35 @@
+project:
+  type: website
+  output-dir: docs
+
+website:
+  title: Latent means models in R
+  sidebar:
+    style: docked
+    search: false
+    contents:
+      - text: README
+        file: index.qmd
+      - data.qmd
+      - examples.qmd
+      - simulation.qmd
+      - text: Manuscript
+        file: manuscript.qmd
+
+format:
+  html: 
+    theme: default
+    html-math-method: katex
+    code-fold: true
+    toc: true
+    toc-location: right
+    title-block-style: default
+    title-block-banner: false
+
+execute:
+  freeze: true
+  message: false
+  warning: false
+  cache: true
+
+bibliography: references.bib

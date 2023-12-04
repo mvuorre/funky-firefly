@@ -1,11 +1,31 @@
-# Practical introduction to latent mean centering in multilevel models of longitudinal data
+# Introduction to latent means models in R
 
->Work in progress! :smile:
+Repository for materials supporting our manuscript discussing practical
+implementations of latent mean centering in multilevel models of
+longitudinal psychological data.
 
-This repository contains materials, code, and data for reproducing our manuscript discussing practical implementations of latent mean centering in multilevel models of longitudinal psychological data.
+- Repo on GitHub: <https://github.com/mvuorre/latent-mean-centering-ms>
+- Archived repo: tbd
+- Online: tbd
 
-This project is currently developed here: <https://mvuorre.github.io/posts/stan-latent-mean-centering/> and discussed on the Stan board: <https://discourse.mc-stan.org/t/latent-mean-centering-latent-covariate-models-in-brms/29424>. Huge thanks already to everyone who contributed to the discussion!
+## Reproduce
 
-# Contributing
+Everything is coded in [R](https://cran.r-project.org/) and bunched
+together as a [Quarto](https://quarto.org/) website. To reproduce, clone
+the repo and render the Quarto documents:
 
-I'm trying to track this project on [GitHub issues](https://github.com/mvuorre/latent-mean-centering-ms/issues). Feel free to peruse there for tasks that I think need to be done at the moment, or propose new ones. Contributions, if possible, via pull requests from dev or a feature branch to main. If not, independent `.R` scripts or text files (preferably on dev) work just fine!
+``` bash
+# Download materials
+git clone https://github.com/mvuorre/latent-mean-centering-ms.git
+cd latent-mean-centering-ms
+
+# Set up R environment
+Rscript -e 'renv::restore(prompt = FALSE)'
+
+# Run code and render outputs
+quarto render
+```
+
+## Contribute
+
+Contributions preferably via pull requests.

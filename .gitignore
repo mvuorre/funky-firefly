@@ -3,14 +3,14 @@
 .RData
 .Ruserdata
 .Renviron
+/.quarto/
+_freeze/
 
-ms.pdf
-ms.log
-ms.docx
-/ms_cache/
-/ms_files/
-/models/
+*.pdf
+*.log
+*.docx
+*_cache/
+*_files/
 /cache/
 /data/
-/sims/
 model-ar1
