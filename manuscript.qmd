@@ -1,0 +1,195 @@
+---
+title: Estimating latent means model with regression models in R
+author:
+  - name: Matti Vuorre
+    url: https://vuorre.com
+    orcid: 0000-0001-5052-066X
+    email: mjvuorre@uvt.nl
+    affiliation:
+      - ref: 1
+  - name: Ethan McCormick
+    affiliation:
+      - ref: 3
+  - name: Mauricio Garnier-Villarreal
+    affiliation:
+      - ref: 4
+  - name: Joran Jongerling
+    orcid: 0000-0001-5697-1381
+    affiliation:
+      - ref: 1
+affiliations:
+  - id: 1
+    name: Tilburg University
+  - id: 3
+    name: todo
+  - id: 4
+    name: todo
+authornote: |
+  Work in progress.
+abstract: |
+  Researchers studying links between observed variables in longitudinal and other repeated measures data sets have long recognized the importance of person-mean centering in order to isolate within- and between-person associations. However, a critical issue in centering---treating the person means as unknown parameters rather than observed values---has received less attention among applied practitioners. One reason for this has been the general unavailability and perceived complexity of latent person-mean centering in contrast to observed mean centering. Here, we introduce latent person-mean centering and accessible syntax for implementing it in a wide variety of flexible bayesian models with the R package brms. We demonstrate the syntax, and benefits of latent centering, through an example analysis of social media effects on adolescent well-being. In appendices, we further contrast the performance of latent mean centering to observed mean centering via simulations, and show how it extends to more than two levels of analysis. Latent mean centering provides unbiased estimates of within- and between-person associations, and we hope that the availability and flexibility of our proposed approach motivates researchers to apply this method widely in longitudinal and other multilevel modelling scenarios.
+keywords: "longitudinal data, repeated measures, centering, R, brms"
+bibliography: references.bib
+
+format: 
+  html: default
+  pdf: default
+  docx: default
+---
+
+```{r setup, include = FALSE}
+library(papaja)
+library(citr)
+library(parameters)
+library(posterior)
+library(lme4)
+library(knitr)
+library(scales)
+library(ggdist)
+library(brms)
+library(tidyverse)
+
+# Document options
+opts_chunk$set(
+  cache = TRUE,
+  echo = FALSE
+)
+
+# HMC and parallel computation options
+MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"))
+if (is.na(MAX_CORES)) MAX_CORES <- parallelly::availableCores(logical = FALSE)
+if (require(cmdstanr)) {
+  options(
+    brms.backend = "cmdstanr", 
+    brms.threads = MAX_CORES %/% 4
+  )
+}
+
+# Save models in a directory
+dir.create("models", FALSE)
+
+# Plotting options
+theme_set(
+  theme_linedraw(base_size = 10) +
+    theme(
+      strip.background = element_rect(fill = "gray90", color = "gray90"),
+      strip.text = element_text(color = "black", hjust = 0),
+      panel.grid = element_blank()
+    )
+)
+```
+
+```{r data-download}
+# Download data if not downloaded
+path <- "data/beyens-et-al-2021.csv"
+dir.create(dirname(path), FALSE)
+if (!file.exists(path)) 
+  download.file("https://uvaauas.figshare.com/ndownloader/files/28057809", path)
+
+# Load and clean
+d <- read_csv(path) %>%
+  # Subset data to a handful of participants' evening observations
+  filter(
+    BeepTE1 == 6,
+    ID %in% sample(.$ID, 30)
+  ) %>% 
+  mutate(
+    person = factor(ID),
+    time = BeepNE1,
+    # Sum of all passive use in the past hour
+    sm = rowSums(select(., INP01E1, INP02E1, WAP01E1, SNP01E1, SNP02E1), na.rm = TRUE),
+    # It can exceed 60 if p reported multiple overlapping uses
+    sm = if_else(sm > 60, 60, sm),
+    happy = AWBE1,
+    .keep = "none"
+  ) %>% 
+  # Drop missing data
+  drop_na(sm, happy)
+
+# Lagged and centered variables
+d <- d %>% 
+  # Lag happiness by person
+  mutate(
+    happy1 = lag(happy), 
+    .by = person
+  ) %>% 
+  # Grand mean center so between-person component is centered on zero
+  mutate(
+    smg = sm - mean(sm, na.rm = TRUE)
+  ) %>% 
+  # Calculate person means and person-specific deviations therein
+  mutate(
+    smb = mean(smg, na.rm = TRUE), 
+    smw = smg - smb,
+    happy1w = happy1 - mean(happy1, na.rm = TRUE),
+    .by = person
+  )
+```
+
+
+# Introduction
+
+In longitudinal and other repeated measures data where predictors are observed associations can emerge at two (or more) levels: Between individuals and within individuals [@bolgerIntensiveLongitudinalMethods2013]. Because these two levels of analysis can embody different theoretical constructs, researchers have widely recognized the importance of centering the data appropriately, such that within-person associations can be estimated independently from between-person associations [@endersCenteringPredictorVariables2007]. If this distinction between sources of variance is not made, the resulting estimates are likely to be confusing mixtures of associations that occur between individuals and within individuals [@cronbachResearchClassroomsSchools1976 p.18; @raudenbushHierarchicalLinearModels2002 p.138]. Specifically, when a predictor can vary at two levels---observations varying around a person's average, and persons' averages varying around the global average---it is common to manipulate the data such that the analysis distinguishes those two levels.
+
+In typical applications, a predictor is separated into two components: First, each individual's mean is calculated. Including the person mean as predictor in a regression model will describe the extent to which individuals with different average levels of the predictor differ on the outcome variable. Second, the individuals' means are subtracted from each observation, leading to a variable that indicates deviations around each person's average. This latter variable represents pure within-person variability. Including it as a model predictor leads to estimating how the outcome differs at different levels of the predictor, for the average person. Typically, it is this latter within-person association that is of key theoretical interest in psychology: It can be used to describe a counterfactual causal scenario where increasing the predictor for an individual leads to changes in that person's outcome [@rohrerTheseAreNot2021].
+
+While simple to implement, this data manipulation trick has one potentially severe shortcoming: It can lead to biases in the estimated regression coefficients, especially when the number of observations per person is small. These biases result from ignoring the uncertainty inherent in the person means: They can only be estimated based on a sample of limited data, but simple calculations cannot carry this uncertainty forward into the resulting estimates. While this issue is recognized in the methodological literature [e.g. @asparouhovLatentVariableCentering2019; @mcneishPrimerTwolevelDynamic2020], practical implementations to overcome it have so far been limited to commercial solutions, most prominently the SEM software MPlus. In this manuscript, we provide a practical tutorial on latent mean centering in the context of longitudinal and repeated measures data in psychology. We implement latent mean centering in a series of multilevel models using the brms R package. Our aim is to provide this illustrative code so that latent mean centering can be more widely adopted within the psychological sciences.
+
+In appendix A(?), we also conduct a simulation study to illustrate the conditions under which latent mean centering is most useful: As the number of observations per participant decreases, the beneficial debiasing effect of latent mean centering becomes more noticeable and important. In addition, while previous work has focused on latent mean centering specifically in the context of longitudinal datasets and timeseries analyses, we point out that it is a more general issue and applicable to datasets with potentially multiple levels of analysis? In appendix B, we extend the syntax to a three level model where latent means are estimated for adolescents nested within classes?
+
+# Latent mean centering tutorial
+
+In this example analysis, we examine a longitudinal dataset of Dutch adolescents' social media use and well-being. The authors of the original research article have made their valuable data openly available, which we appreciate. The sample consists of 387 Dutch adolescents (mean age: 14, 54% girls), who answered 34,930 experience sampling questions about their well-being ("How happy do you feel right now?"; 1: "Not at all", 4: "A little", 7: "Completely") and social media use. For this analysis, we used the sum of passive Instagram, WhatsApp, and Snapchat reported in the past hour. We show a snippet of this data in Table \@ref(tab:tab-data).
+
+```{r}
+#| label: tab-data
+
+d %>% 
+  slice(1:3, .by = person) %>% 
+  head() %>% 
+  apa_table(
+    caption = "Six rows of example data", 
+    note = "sm = passive social media use; smg = grand-mean centered sm; smb = between-person sm; smw = within-person sm; happyw1 = within-person lagged happiness rating.",
+    col_spanners = list(`Original data` = c(1, 5), `Centered values` = c(6, 9)),
+    digits = c(0, 0, 0, 0, 0, 0, 1, 1, 1), 
+    font_size = "small", 
+    span_text_columns = FALSE
+  )
+```
+
+Table \@ref(tab:tab-data) shows the three first observations of two randomly selected participants from the sample. The first four columns contain an anomyous person identifier, the observation time point (an increasing integer), the number of minutes of passive social media use in the past hour, and the happiness rating. Then, for illustration, we have created three additional columns containing the centered social media use variables. The first, "smg", is the simple grand-mean centered "sm" variable. This variable is not required in all analyses. However, it can be used to zero-center the between-person variable if it is of interest. "smb" is the between-person component, which is simply that person's sample mean. "smw" is the deviation of the social media use value on that row from the person's mean, and thus the within-person component.
+
+We loosely follow the authors' original analysis, which focused on the associations between social media use and happiness. To ground our tutorial on common practices, we first ignore latent mean centering, and describe the analysis in terms of the observed values. In this analysis, we are interested in the within- and between-person associations between passive social media use in the past hour and current well-being. To do so, we define a multilevel model of happiness ratings on both "smw" and "smb", and allow for random variability in person-specific averages in happiness ratings, and the association between happiness ratings and "smw". 
+
+**Throw in a line here about why the autoregressive term is included.**
+
+In typical R formula syntax, generalized for multilevel models in the lme4 package, this model is
+
+
+
+
+which translates to the mixed effects model in Box 1. This model returns three key population-level estimates---parameter values assumed to hold for the average person in the population from which the sample was drawn: An intercept, slope of "smb", and slope of "smw". The first describes the happiness level of an average individual who passively used an average amount of social media in the past hour, and 
+
+
+
+
+# Discussion
+
+R [@rcoreteamLanguageEnvironmentStatistical2022]
+
+# Author Contributions
+
+Conceptualization: MV  
+Methodology: MV  
+Software: MV  
+Validation: MV  
+Formal Analysis: MV  
+Data Curation: MV  
+Writing---Original Draft: MV  
+Writing---Review & Editing: MV  
+Visualization: MV  
+Project Administration: MV  
+
+# Conflicts of Interest
+
+The author(s) declare that there were no conflicts of interest with respect to the authorship or the publication of this article.

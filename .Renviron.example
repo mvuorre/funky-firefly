@@ -1,0 +1,5 @@
+# Use this file to set environment variables
+# Remove .example extension to use in R
+
+# Maximum number of cores to use in R
+MAX_CORES = 4
