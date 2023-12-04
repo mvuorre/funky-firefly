@@ -1,0 +1,30 @@
+---
+author:
+  - name: Matti Vuorre
+    url: https://vuorre.com
+    orcid: 0000-0001-5052-066X
+    email: mjvuorre@uvt.nl
+    affiliation:
+      - ref: 1
+  - name: Ethan McCormick
+    affiliation:
+      - ref: 3
+  - name: Mauricio Garnier-Villarreal
+    affiliation:
+      - ref: 4
+  - name: Joran Jongerling
+    orcid: 0000-0001-5697-1381
+    affiliation:
+      - ref: 2
+affiliations:
+  - id: 1
+    name: Tilburg University
+  - id: 2
+    name: Tilburg University
+  - id: 3
+    name: todo
+  - id: 4
+    name: todo
+---
+
+{{< include README.qmd >}}

@@ -1,0 +1,47 @@
+---
+title: Example datasets
+---
+
+Here we download and wrangle the example datasets used in our analyses.
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+```
+
+Throughout, we use an example dataset from "A primer on two-level dynamic structural equation models for intensive longitudinal data in Mplus" [@mcneishPrimerTwolevelDynamic2020]. Those data are available on the OSF (<https://osf.io/wuprx/>). Here we download, clean, and save the data for use in our analyses.
+
+```{r}
+#| label: mh-download
+
+path <- "data/mh.zip"
+url <- "https://files.osf.io/v1/resources/wuprx/providers/osfstorage/5bfc839601593f0016774697/?zip="
+if (!file.exists(path)) {
+  dir.create(dirname(path), showWarnings = FALSE)
+  download.file(
+    url,
+    destfile = path
+  )
+  unzip(path, exdir = "data/mh/")
+}
+```
+
+That extracted all the data and Mplus files to `data/` in the project root. We then wrangle the main data file and save for our analyses:
+
+```{r}
+#| label: mh-wrangle
+
+d <- read_csv(
+  "data/mh/Data/Two-Level Data.csv", 
+  col_names = c("urge", "dep", "js", "hs", "person", "time")
+) %>% 
+  select(
+    person, time, js, hs, urge, dep
+  ) |> 
+  mutate(
+    person = factor(person),
+    time = as.integer(time-1)
+  )
+write_rds(d, "data/mcneish-hamaker.rds")
+```
