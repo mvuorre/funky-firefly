@@ -29,7 +29,7 @@ Rscript -e 'renv::restore(prompt = FALSE)'
 quarto render
 ```
 
-Once the computations are finished
+Once the computations are finished the rendered documents are in docs/.
 
 ## Contribute
 
