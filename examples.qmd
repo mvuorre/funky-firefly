@@ -14,12 +14,12 @@ library(gt)
 library(posterior)
 library(tidyverse)
 
-N_CORES <- min(parallel::detectCores(), 8)
-ITER <- 1500
+# HMC and parallel computation options
+MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"), 4)
 options(
-  mc.cores = N_CORES,
-  brms.backend = if(require(cmdstanr)) "cmdstanr",
-  brms.threads = N_CORES %/% 4
+  brms.backend = Sys.getenv("BRMS_BACKEND", "rstan"), 
+  brms.threads = MAX_CORES %/% 4,
+  mc.cores = MAX_CORES
 )
 
 gt2 <- function(x) {
@@ -122,7 +122,6 @@ We then sample from the model. Everything from here on is standard operating pro
 fit <- brm(
   model,
   data = dat,
-  iter = ITER,
   file = "cache/brm-example-univariate"
 )
 ```
@@ -231,7 +230,6 @@ Sample from model
 fit <- brm(
   bform,
   data = dat,
-  iter = ITER,
   control = list(adapt_delta = 0.95),
   file = "cache/brm-example-4"
 )
@@ -300,7 +298,6 @@ fit <- brm(
   bform,
   data = dat,
   prior = p,
-  iter = ITER,
   control = list(adapt_delta = 0.99),
   file = "cache/brm-example-5",
 )
@@ -354,7 +351,6 @@ fit <- brm(
   bform,
   data = dat,
   prior = p,
-  iter = ITER,
   control = list(adapt_delta = 0.99),
   file = "cache/brm-example-6"
 )
@@ -403,7 +399,6 @@ Sample
 fit <- brm(
   bform,
   data = dat,
-  iter = ITER,
   control = list(adapt_delta = 0.99),
   file = "cache/brm-example-7"
 )
@@ -425,8 +420,101 @@ as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>%
     variable = str_replace(variable, "sd_person__", "var_"),
     mplus = mplus$equation.7$mplus
   ) |> 
-  gt() |> 
-  fmt_number(decimals = 2)
+  gt2()
+```
+
+## Social media use
+
+```{r}
+d <- read_rds("data/beyens-etal.rds")
+
+# Rescale everything to the unit interval
+d <- d |> 
+  mutate(
+    across(c(sm), ~./60),
+    across(starts_with("wb"), ~./7)
+    )
+
+d <- d |> 
+  pivot_longer(c(sm, wb), names_to = "outcome") |> 
+  mutate(
+    i_wb = if_else(outcome == "wb", 1, 0),
+    i_sm = if_else(outcome == "sm", 1, 0)
+  ) |> 
+  # Include predictors from each row
+  left_join(d)
+```
+
+We regress wellbeing on an autocorrelative term and within person effect of passive social media use. Include correlations between person parameters; one of these will be the between-person relationship.
+
+```{r}
+bform <- bf(
+  value ~ 
+    i_wb * (alpha1 + phi * (wb_lag - alpha1) + beta * (sm - alpha2)) + 
+    i_sm * alpha2,
+  nlf(sigma ~ i_wb * sigma1 + i_sm * sigma2),
+  alpha1 + alpha2 + phi + beta ~ 1 + (1 |p| person),
+  sigma1 + sigma2 ~ 1,
+  nl = TRUE
+)
+```
+
+```{r}
+fit <- brm(
+  bform,
+  data = d,
+  control = list(adapt_delta = 0.95),
+  file = "cache/brm-example-sm-1"
+)
+```
+
+```{r}
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+  mutate(
+    across(starts_with("sd_"), ~.^2),
+    across(starts_with("b_sigma"), ~exp(.)^2)
+  ) |> 
+  summarise_draws(
+    mean, sd, ~quantile2(.x, c(.025, .975))
+  )
+  gt2()
+```
+
+## Social media use 2
+
+Same as above but a three-level model class > person > observation.
+
+```{r}
+bform <- bf(
+  value ~ 
+    i_wb * (alpha1 + phi * (wb_lag - alpha1) + beta * (sm - alpha2)) + 
+    i_sm * alpha2,
+  nlf(sigma ~ i_wb * sigma1 + i_sm * sigma2),
+  alpha1 + alpha2 + phi + beta ~ 1 + (1 |p| person) + (1 |c| class),
+  sigma1 + sigma2 ~ 1,
+  nl = TRUE
+)
+```
+
+```{r}
+fit <- brm(
+  bform,
+  data = d,
+  control = list(adapt_delta = 0.95),
+  file = "cache/brm-example-sm-threelevel"
+)
+```
+
+```{r}
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+  mutate(
+    across(starts_with("sd_"), ~.^2),
+    across(starts_with("b_sigma"), ~exp(.)^2)
+  ) |> 
+  summarise_draws(
+    mean, sd, ~quantile2(.x, c(.025, .975))
+  )
+  gt2()
 ```
 
 ## Conclusion

@@ -23,11 +23,12 @@ library(future)
 library(brms)
 library(tidyverse)
 
-N_CORES <- min(parallel::detectCores(), 8)
+# HMC and parallel computation options
+MAX_CORES <- as.numeric(Sys.getenv("MAX_CORES"), 4)
 options(
-  mc.cores = N_CORES,
-  brms.backend = if(require(cmdstanr)) "cmdstanr",
-  brms.threads = N_CORES %/% 4
+  brms.backend = Sys.getenv("BRMS_BACKEND", "rstan"), 
+  brms.threads = MAX_CORES %/% 4,
+  mc.cores = MAX_CORES
 )
 ```
 

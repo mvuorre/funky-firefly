@@ -12,6 +12,8 @@ Encoding: UTF-8
 RnwWeave: knitr
 LaTeX: pdfLaTeX
 
+BuildType: Makefile
+
 ZoteroLibraries: "latent-mean-centering"
 
 SpellingDictionary: en_US
