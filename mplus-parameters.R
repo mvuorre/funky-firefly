@@ -1,3 +1,5 @@
+# Read and wrangle MH's Mplus model parameters for comparison
+
 library(MplusAutomation)
 
 mplus <- readModels("data/mh/Output Files")
