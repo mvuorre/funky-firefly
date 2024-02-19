@@ -1,13 +1,16 @@
 # Introduction to latent means models in R
 
 
-Repository for materials supporting our manuscript discussing practical
-implementations of latent mean centering in multilevel models of
-longitudinal psychological data.
+Repository for our manuscript discussing an
+[R](https://cran.r-project.org/) and
+[brms](https://cran.r-project.org/web/packages/brms/) implementation of
+latent mean centering in multilevel models of longitudinal psychological
+data.
 
 - Repo on GitHub: <https://github.com/mvuorre/latent-mean-centering-ms>
 - Archived repo: tbd
 - Online: tbd
+- preprint: tbd
 
 ## Reproduce
 
@@ -29,7 +32,8 @@ Rscript -e 'renv::restore(prompt = FALSE)'
 quarto render
 ```
 
-Once the computations are finished the rendered documents are in docs/.
+Once the computations are finished (this will take a long time depending
+on your computer) the rendered documents are in `docs/`.
 
 ## Contribute
 
