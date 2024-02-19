@@ -19,8 +19,7 @@ website:
 format:
   html: 
     theme: default
-    html-math-method: katex
-    code-fold: true
+    code-fold: show
     toc: true
     toc-location: right
     title-block-style: default
