@@ -7,10 +7,11 @@ Here we download and wrangle the example datasets used in our analyses.
 ```{r}
 #| label: setup
 
+library(haven)
 library(tidyverse)
 ```
 
-Throughout, we use an example dataset from "A primer on two-level dynamic structural equation models for intensive longitudinal data in Mplus" [@mcneishPrimerTwolevelDynamic2020]. Those data are available on the OSF (<https://osf.io/wuprx/>). Here we download, clean, and save the data for use in our analyses.
+We will use two example datasets. The first is from "A primer on two-level dynamic structural equation models for intensive longitudinal data in Mplus" [@mcneishPrimerTwolevelDynamic2020]. Those data are available on the OSF (<https://osf.io/wuprx/>). Here we download, clean, and save the data for use in our analyses.
 
 ```{r}
 #| label: mh-download
@@ -46,6 +47,8 @@ d <- read_csv(
 write_rds(d, "data/mcneish-hamaker.rds")
 ```
 
+Our second dataset, analyzed in the manuscript, is from @beyens2020. Below, we download & wrangle then save it for later analyses.
+
 ```{r data-process}
 # The data is cited in the paper as "The dataset generated and analysed during the current study is available in Figshare." (https://uvaauas.figshare.com/articles/dataset/Dataset_belonging_to_Beyens_et_al_2020_The_effect_of_social_media_on_well-being_differs_from_adolescent_to_adolescent/12497990)
 
@@ -74,34 +77,22 @@ d <- read_spss(path) %>%
   mutate(
     class = factor(ClassNr),
     person = factor(EthicaID),
-    # I think they divided this by ten
     time = (OccNrR - 1),
-    # active = rowSums(select(., contains("Act")), na.rm = TRUE),
-    sm = rowSums(select(., contains("Pas")), na.rm = TRUE) / 60,
-    wb = as.numeric(AffWB) / 7, 
+    sm = rowSums(select(., contains("Pas"), contains("Pas")), na.rm = TRUE) / 60,
+    happy = as.numeric(AffWB) / 7, 
     .keep = "none"
   ) %>% 
   arrange(person, class, time)
 
-# Remove times in excess of 60min (1 hour)
-d <- d %>% 
-  mutate(
-    across(c(sm), ~if_else(. > 1, 1, .))
-  )
+# Sum scores exceeding 60minutes (i.e., less than 2.5% of all occasions per subscale) were recoded to 60 minutes. (Beyens et al. p.9)
+d$sm <- if_else(d$sm > 1.0, 1.0, d$sm)
 
-# Centered and lagged variables
+# Lag well-being
 d <- d %>% 
   mutate(
-    sm_b = mean(sm, na.rm = TRUE),
-    sm_c = sm - mean(sm, na.rm = TRUE),
-    across(
-      c(wb),
-      .fns = list(lag = ~lag(.))
-    ),
+    happy_lag = lag(happy),
     .by = person
   )
-
-d
 
 write_rds(d, "data/beyens-etal.rds")
 ```
