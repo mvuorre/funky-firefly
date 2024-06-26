@@ -1,30 +1,1497 @@
 ---
-author:
+title: Estimating dynamic structural equation models in R with the brms package
+running-head: DSEM with R & brms
+author: 
   - name: Matti Vuorre
-    url: https://vuorre.com
-    orcid: 0000-0001-5052-066X
-    email: mjvuorre@uvt.nl
-    affiliation:
+    affiliation: 
       - ref: 1
-  - name: Ethan McCormick
-    affiliation:
-      - ref: 3
+    corresponding: true
+    email: mjvuorre@uvt.nl
+    orcid: 0000-0001-5052-066X
   - name: Mauricio Garnier-Villarreal
-    affiliation:
-      - ref: 4
-  - name: Joran Jongerling
-    orcid: 0000-0001-5697-1381
-    affiliation:
+    affiliation: 
       - ref: 2
+  - name: Ethan McCormick
+    affiliation: 
+      - ref: 3
+  - name: Joran Jongerling
+    affiliation: 
+      - ref: 4
 affiliations:
   - id: 1
     name: Tilburg University
+    department: Department of Social Psychology
   - id: 2
-    name: Tilburg University
+    name: Vrije Universiteit Amsterdam
   - id: 3
-    name: todo
+    name: Leiden University
   - id: 4
-    name: todo
+    name: Tilburg University
+    department: Methods and Statistics
+abstract: |
+  Dynamic Structural Equation Models (DSEM) combine latent variables, time-series (lagged) relations, and hierarchical structures for flexible analyses of intensive longitudinal data, such as collected in experience sampling and other longitudinal designs [@asparouhov2018]. However, the general availability of DSEM is currently limited to commercial and closed source software packages. Here, we show how to specify flexible DSEMs with the popular free and open source brms R package. Using example data on adolescent well-being from the published literature [@beyens2020], we demonstrate two- and three-level location-scale models with lagged relations, time varying and time-invariant covariates, and how to post-process the models for effective communication of results. In an online supplement, we confirm the validity of our approach with a parameter recovery simulation, and compare our results using example analyses from @mcneish2020. DSEMs provide an exciting and robust framework for analyses of intensive longitudinal data and we hope our illustration of estimating them with free and open source software packages spurs advances in the area. 
+keywords: [R, brms, statistics, latent variable, dynamic structural equation model]
+authornote: |
+  This manuscript is not yet peer reviewed.
+bibliography: bibliography.bib
+citeproc: true
+csl: apa.csl
 ---
 
-{{< include README.qmd >}}
+```{r}
+#| label: setup
+#| include: false
+
+# Packages
+library(latex2exp)
+library(tidybayes)
+library(modelr)
+library(ellipse)
+library(scales)
+library(knitr)
+library(posterior)
+library(patchwork)
+library(ggdist)
+library(cmdstanr)
+library(brms)
+library(tidyverse)
+
+# Output options
+knitr::opts_chunk$set(
+  eval = TRUE,
+  cache = TRUE,
+  warning = FALSE,
+  error = FALSE,
+  message = FALSE,
+  echo = FALSE
+)
+options(digits = 2)
+
+# Plotting options
+theme_set(
+  theme_classic(base_size = 9) +
+    theme(
+      strip.text = element_text(color = "black", hjust = 0),
+      strip.background = element_rect(color = NA, fill = NA),
+      strip.text.x = element_text(size = rel(0.9)),
+      line = element_line(linewidth = .25),
+      plot.tag = element_text(size = rel(1))
+    )
+)
+
+# Model estimation options, customize in .Renviron
+dir.create("cache", FALSE)
+options(
+  brms.backend = Sys.getenv("BRMS_BACKEND", "rstan"), 
+  brms.threads = as.numeric(Sys.getenv("MAX_CORES"), 1),
+  mc.cores = as.numeric(Sys.getenv("MAX_CORES"), 4)
+)
+```
+
+```{r}
+#| label: functions
+
+# Neat posterior summaries
+sm <- function(
+    x, 
+    variables = c("b_", "sd_", "cor_", "sigma")
+) {
+  x |> 
+    as_draws_df(variable = variables, regex = TRUE) |> 
+    mutate(
+      across(any_of(c("k0_Intercept", "k1_Intercept")), ~exp(.x))
+    ) |> 
+    summarise_draws(
+      mean, sd,
+      ~quantile2(.x, c(.025, .975))
+    ) |> 
+    mutate(
+      variable = str_remove_all(variable, "_Intercept")
+    )
+}
+```
+
+```{r}
+#| label: data-beyens-etal
+
+# The data is cited in the paper as "The dataset generated and analysed during the current study is available in Figshare." (https://uvaauas.figshare.com/articles/dataset/Dataset_belonging_to_Beyens_et_al_2020_The_effect_of_social_media_on_well-being_differs_from_adolescent_to_adolescent/12497990)
+
+# Download data if not yet downloaded
+path_in <- "data/beyens-et-al-2020.sav"
+if (!file.exists(path_in)) {
+  dir.create("data", FALSE)
+  # Data from figshare
+  download.file(
+    "https://uvaauas.figshare.com/ndownloader/files/24028271", 
+    path_in
+  )
+  # Code from OSF
+  download.file(
+    "https://files.de-1.osf.io/v1/resources/bvfuw/providers/osfstorage/5df9effa64e19d000d0f51da/?zip=",
+    "data/Analyses.zip"
+  )
+  unzip(
+    "data/Analyses.zip",
+    exdir = "data/Analyses"
+  )
+}
+
+path_out <- "data/beyens-etal.rds"
+if (!file.exists(path_out)) {
+  
+  library(haven)
+  
+  # Active, Passive, and Total were sums of the platform (e.g. whatsapp) times
+  d <- read_spss(path_in) %>% 
+    mutate(
+      class = factor(ClassNr),
+      person = factor(EthicaID),
+      time = as.integer(OccNrR - 1),
+      # Rescale to 0-1 interval
+      sm = rowSums(
+        select(., contains("Pas"), contains("Pas")), 
+        na.rm = TRUE
+      ) / 60,
+      happy = (as.numeric(AffWB)-1) / 6, 
+      .keep = "none"
+    ) %>% 
+    arrange(person, class, time)
+  
+  # Sum scores exceeding 60minutes (i.e., less than 2.5% of all occasions per subscale) were recoded to 60 minutes. (Beyens et al. p.9)
+  d$sm <- if_else(d$sm > 1.0, 1.0, d$sm)
+  
+  # Lag well-being
+  d <- d %>% 
+    mutate(
+      hlag = lag(happy),
+      .by = person
+    )
+  
+  write_rds(d, path_out)
+}
+
+dat <- read_rds("data/beyens-etal.rds")
+```
+
+# Introduction
+
+The dynamics of psychological attributes over time are central to psychological research. To examine, longitudinal datasets where individuals are repeatedly assessed over time have typically been analysed under one of two broad statistical frameworks: Multilevel and structural equation models (SEM) [@bolger2013]. Dynamic structural equation models (DSEM) [@asparouhov2018] bring features of those two frameworks together and allow analysts to examine longitudinal data for dynamic relationships (relationships over time), latent variables, and more. However, accessible software implementations of DSEM models in psychology are currently limited to Mplus [@muthén2017] and Stan [@standevelopmentteam2023]—the former being a commercial closed-source package, and the latter perceived to have a prohibitively steep learning curve for many applied psychologists.
+
+To encourge and enable a broader application and examination of DSEM, we show how to implement the main features of those models, latent variables and dynamic relations, in the free and open source R programming environment [@rcoreteam2024] using the brms package [@bürkner2017; @bürkner2018]. The code for reproducing this manuscript is at <https://github.com/mvuorre/funky-firefly> and this document is available at [todo].
+
+# Example 1: univariate two-level AR(1) model
+
+## Dataset
+
+Throughout our example analyses, we investigate a longitudinal dataset of 63 Dutch adolescents' social media use and well-being described in and shared by @beyens2020. The adolescents (54% girls; 8th and 9th graders) took part in a 7-day experience sampling study in which they reported their well-being and social media use six times per day on their mobile phones. In each \~2-minute survey, participants reported how many minutes in the past hour they used each of several popular social media platforms (e.g. Instagram, WhatsApp). They then answered "How happy do you feel right now?" by choosing a response option from 1 ("Not at all") to 7 ("Completely").
+
+With these data, @beyens2020 found little relation between active or passive social media use and well-being for the average person. However, the authors found that relation to vary strongly between adolescents, and have since confirmed this finding with extensions to the data and other well-being outcomes [@beyens2021b]. In this manuscript, we use their openly available data [@beyens2021a].
+
+```{r}
+#| label: tbl-data-1
+#| tbl-cap: Example data.
+
+dat |> 
+  slice(1:3, .by = person) |> 
+  head() |> 
+  kable()
+```
+
+We show the first three measurement occasions for two random participants in Table @tbl-data-1). The first three columns are, respectively, a classroom identifier, an anonymous person identifier, and the observation index for that person. For our example analyses, we collapsed across active and passive social media use; consequently `sm` is the reported hours of total social media use in the past hour. Our key outcome variable is `h`, the happiness rating (rescaled to 0-1 interval). We also include `hlag`, the time-1 lagged version of `h`. Note that it is missing on each participant's first observation.
+
+In our first example analysis, we examine these data for potential autocorrelative trends in happiness. To do so, we build a minimal two-level DSEM model that estimates an autocorrelative term of happiness that varies randomly between individuals and a latent mean term that is used to within-person-center the lagged happiness ratings.
+
+## Centering
+
+The issue of isolating between- and within-cluster variance in repeated measures data is widely appreciated [@asparouhovLatentVariableCentering2019; @asparouhov2018; @bolger2013; @enders2007; @mcneish2020], and is a key topic of our write-up. Typically, researchers isolate within- and between-person variance by entering two predictors to their regressions instead of one. First, using the person-means as predictors allows examining how people differ from one another in their average responses. Second, researchers subtract the person-means from each predictor value, and use the resulting within-person-centered variable to examine within-person associations. That is, within- and between-person centering is an easy but important data-manipulation step.
+
+However, using these calculated variables can lead to biased parameter estimates especially when participants provide only a small number of observations [@mcneish2020]. Specifically, using the means calculated from data to center variables leads to Nickell’s (negative bias in autoregressive effects) [@nickell1981] and Lüdtke’s (bias in other time-varying effects) [@lüdtke2008] biases. To avoid these biases, analysts can instead *latent*-mean-center their variables. In contrast to observed mean centering, latent mean centering is performed as part of the model, such that uncertainty in the estimated means is incorporated to the resulting model estimates. We now turn to our first example model that illustrates obtaining latent means and using them to center within-person variables inside a multilevel model.
+
+## Model
+
+This model examines the extent of first-degree autocorrelation among happiness responses, and how it varies across individuals. We write this univariate two-level AR(1) model of happiness ($H$) for the $i^{th}$ individual at their $t^{th}$ measurement occasion as
+
+$$
+\begin{align*}
+H_{it} &\sim N(\beta_{0i} + \beta_{1i}(H_{it-1} - \beta_{0i}), \sigma^2), \\
+\beta_{0i} &= \bar{\beta}_0 + u_{0i}, \\
+\beta_{1i} &= \bar{\beta}_1 + u_{1i}, \\
+\begin{bmatrix}
+  u_{0i} \\ u_{1i}
+\end{bmatrix} &\sim MVN\left(
+  \begin{bmatrix}
+    0 \\ 0
+  \end{bmatrix},
+  \begin{pmatrix}
+    \tau_0 \ & \\ 
+    \rho_{01} \ &\tau_1
+  \end{pmatrix}
+\right).
+\tag{1}
+\end{align*}
+$$
+
+In words, we assume the happiness ratings to be normally distributed around person-specific intercepts ($\beta_{0i}$) and time-1 autocorrelative coefficients ($\beta_{1i}$), which are multivariate normal distributed around means $\bar{\beta}_0$ and standard deviations $\tau$, with $\rho_{01}$ indicating the degree to which individuals' intercepts and slopes are correlated. A critical term in Equation 1 is $\beta_{1i}(H_{it-1} - \beta_{0i})$. It both specifies the autocorrelative coefficient $\beta_{1i}$ and creates its predictor, the latent-mean-centered time-1 lagged happiness rating for person $i$ by subtracting the person's estimated (latent) happiness mean $\beta_{0i}$ from their time-1 lagged happiness response.
+
+The brms syntax for estimating Model 1 is shown below, where we save the model formulas to an object named `m1`. We specify the syntax inside the `bf()` (short for brmsformula) function so that it is appropriately interpreted.
+
+```{r}
+#| label: model-1-specify
+#| echo: true
+
+m1 <- bf(
+  happy ~ b0 + b1 * (hlag - b0),
+  c(b0, b1) ~ 1 + (1 |p| person),
+  nl = TRUE
+)
+```
+
+In the first argument to `bf()`, we specified an outcome (`happy`) on the left-hand side (LHS) of the tilde, and on the RHS a (potentially nonlinear) combination of the predictor variables and parameters to be estimated. This level-1 regression equation is for the location parameter of the chosen outcome distribution---we used the default gaussian distribution and will do so throughout. All names in this equation refer either to variables in the data (`happy`, `hlag`), or parameters to be estimated (`b0`, `b1`). To distinguish, the former must exist in the data.
+
+On the following line we specified the level-2 linear equations of the level-1 equation's parameters. We used `c(b0, b1)` to specify that the RHS applies to both parameters. `1` specifies a global intercept, and `(1 |p| person)` specifies person-specific deviations from that global intercept. Because there are multiple parameters with person-specific deviations, we used `|p|` to ensure that they will be estimated within a common multivariate normal distribution whose correlations are also estimated. Finally, `nl = TRUE` on the last line is required to be able to name parameters on the first line.
+
+To estimate this model, we pass the above model formula object to `brm()`:
+
+```{r}
+#| label: model-1-sample
+#| echo: true
+
+fit1 <- brm(
+  formula = m1,
+  data = dat,
+  file = "cache/brm-1"
+)
+```
+
+In addition to the model formula in `m1`, above we specified two more arguments to `brm()`: Name of the data in R (we have loaded the data illustrated in Table @tbl-data-1) to an R object called `dat`), and the file in which the estimated model should be saved. The latter is useful because bayesian estimation can be time-consuming (this example took less than a minute; we created the `cache/` directory before). After the model has been estimated, calling `summary(fit1)` will print a numerical summary of the estimated model in the R console. We show that printout in Appendix 1, and here focus on posterior summaries of the key parameter estimates, shown in Table @tbl-fit-1).
+
+```{r}
+#| label: tbl-fit-1
+#| tbl-cap: Summaries of Model 1 key parameters' posterior distributions.
+
+fit1 |> 
+  sm() |> 
+  mutate(
+    variable = str_remove_all(variable, "person__")
+  ) |> 
+  kable()
+```
+
+The first row of Table @tbl-fit-1), `b_b0` describes the happiness intercept for the average person. In Equation 1, we refer to these "average betas" with horizontal bars ($\bar{\beta}$) to indicate that they are the means around which the person-specific deviations vary. The posterior mean of this parameter, in the "mean" column, indicates the expectation of the average person's happiness mean for an observation with an average previous happiness. The following values in Table @tbl-fit-1) are the posterior standard deviation (analogous to the standard error) and 2.5 and 97.5 percentiles. The latter two values delimit the 95% Credibility Interval (CI), which describes the most likely values of this model parameter given the prior distributions and data.
+
+The second row of Table @tbl-fit-1) describes the posterior distribution of the happiness autocorrelation parameter for the average person. We can determine with 95% confidence that this parameter is positive---happiness predicts itself over time. The `b_` prefix to these parameters is brms' convention to indicate that they refer to regression coefficients.
+
+The rows prepended with `sd_` describe the standard deviations of the person-specific deviations $u_{0i}$ and $u_{1i}$ around their respective means, and `cor_` their correlations. We glean from the standard deviations that there is considerable between-person heterogeneity in both model intercepts and autocorrelations [@bolgerCausalProcessesPsychology2019]. Their correlation is estimated with a great degree of uncertainty and we therefore cannot confidently even determine the direction of their association. Finally, `sigma` is the model's residual standard deviation, which we did not model on covariates.
+
+We plot this model's estimated response values (`happy`) across values of its lagged version in Figure @fig-fit-1.
+
+```{r}
+#| label: fig-fit-1
+#| fig-height: 2.6
+#| fig-cap: "Model 1 results. A. Scatterplot of person-specific intercepts ($u_0$) and autocorrelation parameters ($u_1$). Dark points are posterior means from Model 1; light circles are point estimates from models fitted separately to individuals' data. Blue point and ellipse indicates the posterior mean and 95%CI of $\\bar{\\beta}_0$ and $\\bar{\\beta}_1$. B. Implied regression line of happiness on time-1 lagged happiness for the average person. Points indicate data values and are jittered to reduce overplotting. C. As B. but for nine individuals arranged by increasing autocorrelation coefficient."
+
+# Get slopes in increasing order and select 9
+fit1_coef <- coef(fit1)$person |> 
+  as.data.frame() |>
+  rownames_to_column("person") |> 
+  tibble() |> 
+  rename_with(~str_remove_all(., "_Intercept"))
+
+nine_persons <- fit1_coef |> 
+  arrange(Estimate.b1) |> 
+  filter(((1:63) %% 7)==0) |> 
+  pull(person)
+
+epred_average <- dat |> 
+  data_grid(
+    hlag = seq_range(hlag, n = 9)
+  ) |> 
+  add_epred_draws(fit1, re_formula = NA) |> 
+  mean_qi()
+
+epred_person <- dat |> 
+  filter(person %in% nine_persons) |> 
+  group_by(person) |> 
+  data_grid(
+    hlag = seq_range(hlag, n = 9)
+  ) |> 
+  add_epred_draws(fit1) |> 
+  mean_qi()
+
+p1 <- epred_average |> 
+  ggplot(aes(hlag, .epred)) +
+  geom_ribbon(
+    aes(ymin = .lower, ymax = .upper),
+    fill = "dodgerblue2", alpha = 0.2
+  ) +
+  geom_line(col = "dodgerblue2") +
+  geom_point(
+    data = dat |> 
+      drop_na(happy),
+    aes(y = happy),
+    shape = 1, alpha = 0.5, size = 0.5,
+    position = position_jitter(.01, .01)
+  )
+
+p2 <- epred_person |>   
+  ggplot(aes(hlag, .epred)) +
+  geom_ribbon(
+    aes(ymin = .lower, ymax = .upper),
+    fill = "grey80"
+  ) +
+  geom_line(linewidth = 0.33) +
+  geom_point(
+    data = dat |> 
+      filter(person %in% nine_persons) |> 
+      drop_na(happy),
+    aes(y = happy),
+    shape = 1, alpha = 0.5, size = 0.5,
+    position = position_jitter(.01, .01)
+  ) +
+  facet_wrap("person")
+
+p1p2 <- (p1 | p2) & 
+  scale_x_continuous(
+    "Social media use",
+    breaks = c(0, 0.5, 1),
+    labels = c("0", "0.5", "1")
+  ) &
+  scale_y_continuous(
+    "Happy",
+    breaks = c(0, 0.5, 1),
+    labels = c("0", "0.5", "1")
+  ) &
+  coord_cartesian(
+    xlim = 0:1, ylim = 0:1
+  )
+
+# Intercept-slope scatterplot
+fit1_coef_lm <- dat |> 
+  group_by(person) |> 
+  group_modify(
+    ~summary(lm(happy ~ hlag, data = .x))$coefficients |> 
+      as.data.frame() |> 
+      rownames_to_column("variable") |> 
+      select(variable, estimate = Estimate, se = `Std. Error`) |> 
+      pivot_wider(
+        names_from = variable, 
+        values_from = c(estimate, se)
+      )
+  ) |> 
+  ungroup()
+
+fit1_fixef <- sm(fit1, variables = "b_") |> 
+  pivot_wider(names_from = variable, values_from = -variable)
+fit1_fixef_ellipse <- as_draws_df(fit1, variable = "b_", regex = TRUE) |> 
+  summarize_draws(mean, sd)
+
+fit1_fixef_ellipse <- ellipse(
+  cor(as.data.frame(fit1)[,1:2])[1,2],
+  scale = fit1_fixef_ellipse$sd, centre = fit1_fixef_ellipse$mean
+) |> as_tibble()
+
+p3 <- fit1_coef |> 
+  left_join(fit1_coef_lm) |> 
+  ggplot(aes(x = `estimate_(Intercept)`, y = estimate_hlag)) +
+  scale_x_continuous(
+    "Intercept",
+    expand = expansion(-0.1)
+  ) +
+  scale_y_continuous(
+    "Slope",
+    expand = expansion(-0.2)
+  ) +
+  # geom_segment(
+  #   aes(xend = Estimate.b0, yend = Estimate.b1),
+  #   linewidth = 0.1, alpha = 0.5
+  # ) +
+  geom_point(
+    aes(`estimate_(Intercept)`, estimate_hlag),
+    col = "gray80", size = 0.75
+  ) +
+  geom_point(
+    aes(x = Estimate.b0, y = Estimate.b1), 
+    col = "black", size = 1
+  ) +
+  geom_point(
+    data = fit1_fixef,
+    aes(
+      x=mean_b_b0, 
+      y=mean_b_b1
+    ), 
+    col = "dodgerblue2", size = 2
+  ) +
+  geom_path(
+    data = fit1_fixef_ellipse,
+    aes(x, y),
+    col = "dodgerblue", linewidth = 0.75
+  ) +
+  theme(aspect.ratio = 1)
+
+(p3 | p1p2) + plot_annotation(tag_levels = "A")
+```
+
+Although the model estimated here already included key DSEM features, dynamic relations and latent variables, it only included one modelled variable and therefore is likely to be of limited practical utility. Next, we will build a more useful model that includes social media use as a time-varying covariate.
+
+# Example 2: Multivariate two-level AR1 model
+
+For this next example, we expand on the previous univariate autocorrelative model of happiness by including social media use in the past hour as a predictor. Our research question with these data is: To what extent does an individual's total social media use in the past hour predict that individual's current happiness when their immediately preceding happiness is adjusted for? That is, we are specifically interested in the within-person correspondence between social media use and well-being.
+
+## Model
+
+As above (Equation 1), we model the happiness rating of the $i^{th}$ individual at their $t^{th}$ measurement occasion as normally distributed. We model the response distribution's mean on an intercept ($\beta_{0i}$), a regression coefficient of the previous happiness rating ($\beta_{1i}$), and a coefficient for within-person-centered social media use ($\beta_{2i}$). Critically, we again center the lagged happiness and social media use predictors within the model by subtracting the estimated person-specific latent means $\beta_{0i}$ and $\beta_{3i}$ from the corresponding observed values. Formally, the model is (we omit the sampling statement for the person-varying parameters for brevity)
+
+$$
+\begin{align*}
+H_{it} &\sim N(\eta_{it}, \sigma^2_0), \\
+\eta_{it} &= \beta_{0i} + \beta_{1i}(H_{it-1} - \beta_{0i}) + \beta_{2i}(SM_{it} - \beta_{3i}), \\
+SM_{it} &\sim N(\beta_{3i}, \sigma^2_1), \\
+\beta_{0i} &= \bar{\beta}_0 + u_{0i}, \\
+\beta_{1i} &= \bar{\beta}_1 + u_{1i}, \\
+\beta_{2i} &= \bar{\beta}_2 + u_{2i}, \\
+\beta_{3i} &= \bar{\beta}_3 + u_{3i}.
+\tag{2}
+\end{align*}
+$$
+
+The key difference in Equation 2 above, compared to Equation 1, is the second sampling statement for social media use ($SM$) needed to estimate its person-specific means. However, this model is difficult to specify in common multilevel modelling software, because its regression formulas for different outcomes have common parameters ($\beta_{3i}$).
+
+There is a somewhat simple solution to this issue: We can "stack" the multivariate data to a longer univariate data table. To do so, we can for example use the `pivot_longer()` function from the tidyr R package [@tidyr2024]. We show the result of this data stacking in @tbl-data-2). Instead of separate columns for happiness and social media use, there are now two indicator columns `Ih` (for happiness) and `Ism` (social media) that are 1 when that corresponding outcome's value is in the `y` column and 0 otherwise.
+
+```{r}
+#| label: tbl-data-2
+#| tbl-cap: Six rows of example data stacked to long format.
+
+dat <- dat |> 
+  pivot_longer(sm:happy, names_to = "outcome", values_to = "y") |> 
+  mutate(
+    Ih = if_else(outcome == "happy", 1, 0) |> as.integer(),
+    Ism = if_else(outcome == "sm", 1, 0) |> as.integer(), 
+    .before = y
+  ) |> 
+  left_join(dat)
+
+dat2 <- dat |> 
+  select(class, person, time, Ih, Ism, sm, happy, hlag, y)
+
+dat2 |> 
+  slice(1:4, .by = person) |> 
+  head() |> 
+  kable()
+```
+
+Consequently, we then reparameterize the model for the stacked data table to treat `y` as the outcome, and allocate parameters appropriately to either speak to happiness or social media use using the two indicator variables `Ih` and `Ism`. The level-1 equations of this model is then written as
+
+$$
+\begin{align*}
+Y_{it} \sim\ &N(\eta_{it}, \sigma_{it}^2), \\
+\eta_{it} =\ &I_{Hit}(\beta_{0i} + 
+  \beta_{1i}(H_{it-1} - \beta_{0i}) + 
+  \beta_{2i}(SM_{it} - \beta_{3i})) + \\
+  &I_{SMit}(\beta_{3i}), \\
+\sigma_{it} =\ &\text{exp}(I_{Hit}\kappa_0 + I_{SMit}\kappa_1).
+\tag{3}
+\end{align*}
+$$
+
+We omit the level-2 equations because they are identical to those in Equation 2. This model estimates the same parameters as Equation 2, but has been rearranged to a univariate form with the help of the two indicator variables $I_H$ and $I_{SM}$. The former is 1 on row $it$ if the outcome on that row is `happy` (see line 2 in @tbl-data-2)), and zero otherwise. The latter is 1 on row $it$ if the outcome on that row is `sm` (see line 1 in @tbl-data-2)), and zero otherwise. Accordingly, we now model the outcome $Y$ for the $it^{th}$ observation, and those indicator variables assign appropriate coefficients to the regression formula for $Y$'s mean. Importantly, the last line of Equation 3 also models separate residual standard deviations for the two outcomes. Because standard deviations must be positive, it is common to model these parameters through a log-link function. brms specifies this link function automatically.
+
+With the data in Table @tbl-data-2), we can now specify Equation 3 with brms' model syntax as follows:
+
+```{r}
+#| label: model-2-specify
+#| echo: true
+
+bform <- bf(
+  y ~ 
+    Ih * (b0 + b1 * (hlag - b0) + b2 * (sm - b3)) + 
+    Ism * b3,
+  c(b0, b1, b2, b3) ~ 1 + (1 |p| person),
+  nlf(sigma ~ Ih * k0 + Ism * k1),
+  c(k0, k1) ~ 1,
+  nl = TRUE
+)
+```
+
+In the above code snippet, we have specified that `y` is modeled on one of two regression equations, depending on values of the indicator variables `Ih` ($I_H$) and `Ism` ($I_{SM}$). We then drew samples from this model's posterior distribution as in Example 1, and summarize the key parameters' posterior distributions in Table @tbl-fit-2). The estimated autocorrelation for the average person ($\bar{\beta}_1$) is very similar to Model 1's estimate. A key addition in Model 2 is the $\bar{\beta}_2$ parameter, which indicates the change in happiness associated with a one-hour increase in the past hour's social media use for the average person. The 95%CI of this parameter ranges from 0.03 to 0.11: Social media use predicts slightly increased happiness within-person.
+
+```{r}
+#| label: model-2-sample
+
+fit2 <- brm(
+  bform,
+  data = dat,
+  control = list(adapt_delta = 0.99),
+  file = "cache/brm-2"
+)
+```
+
+```{r}
+#| label: tbl-fit-2
+#| tbl-cap: Summaries of estimated parameters from Model 2.
+
+sm(fit2) |> 
+  kable()
+```
+
+In addition, we might be interested in the correlation parameters of this model. $\rho_{03}$ in Equation 2.1 indicates the extent to which the intercepts, or the (latent) person-means of `happy` and `sm` are correlated. We see from @tbl-fit-2) that this correlation is positive on expectation (0.13), but that we have not estimated it very precisely with the 95%CI ranging from -0.24 to 0.5. Finally, we visualize the key results of this model in @fig-fit-2).
+
+```{r}
+#| label: fig-fit-2
+#| fig-height: 4
+#| fig-cap: Implied regression lines of happiness on the previous hour's aggregated social media use for the average person (left) and for nine individuals arranged by increasing slope coefficient (right). Points indicate data values and are jittered to reduce overplotting.
+
+# Get slopes in increasing order and select 9
+tmp <- coef(fit2)$person[,,"b2_Intercept"] |> 
+  as.data.frame() |> 
+  rownames_to_column("person") |> 
+  arrange(Estimate) |> 
+  filter(((1:63) %% 7)==0) |> 
+  distinct(person)
+
+epred_average <- dat |> 
+  data_grid(
+    sm = seq_range(sm, n = 9),
+    hlag = mean(hlag, na.rm = TRUE),
+    Ih = 1, Ism = 0
+  ) |> 
+  add_epred_draws(fit2, re_formula = NA) |> 
+  mean_qi()
+
+epred_person <- dat |> 
+  filter(person %in% tmp$person) |> 
+  group_by(person) |> 
+  data_grid(
+    sm = seq_range(sm, n = 9),
+    hlag = mean(hlag, na.rm = TRUE),
+    Ih = 1, Ism = 0
+  ) |> 
+  add_epred_draws(fit2) |> 
+  mean_qi()
+
+p1 <- epred_average |> 
+  ggplot(aes(sm, .epred)) +
+  geom_ribbon(
+    aes(ymin = .lower, ymax = .upper),
+    fill = "grey80"
+  ) +
+  geom_line() +
+  geom_point(
+    data = dat |> 
+      filter(Ih == 1) |> 
+      drop_na(happy),
+    aes(y = happy),
+    shape = 1, alpha = 0.5,
+    position = position_jitter(.01, .01)
+  )
+
+p2 <- epred_person |>   
+  ggplot(aes(sm, .epred)) +
+  geom_ribbon(
+    aes(ymin = .lower, ymax = .upper),
+    fill = "grey80"
+  ) +
+  geom_line() +
+  geom_point(
+    data = dat |> 
+      filter(person %in% tmp$person, Ih == 1) |> 
+      drop_na(happy),
+    aes(y = happy),
+    shape = 1, alpha = 0.5,
+    position = position_jitter(.01, .01)
+  ) +
+  facet_wrap("person")
+
+
+(p1 | p2) & 
+  scale_x_continuous(
+    "Social media use",
+    breaks = c(0, 0.5, 1)
+  ) &
+  scale_y_continuous(
+    "Happy",
+    breaks = c(0, 0.5, 1)
+  ) &
+  coord_cartesian(
+    xlim = 0:1, ylim = 0:1
+  )
+```
+
+Models 1 and 2 have now examined the extent to which happiness responses in this design are predicted by earlier happiness reports and current social media use, and allowed variability in all parameters between individuals. However, the models thus far did not allow for another potentially important source of variation (or clustering), the classroom of each student. Example 3 turns the focus on that by estimating a three-level model.
+
+# Example 3: Three-level model
+
+The 63 adolescents in this study were all students in one of six classes. Our previous two-level model did not acknowledge potential between-class variation, but there are at least two reasons for modeling it. One, ignoring the clusters might lead to estimates that are too certain and therefore likely to lead to conclusions that are made with unwarranted confidence. Second, differences between clusters might be theoretically interesting by informing analysts about variation between naturally occurring groups in how they respond to the study items.
+
+## Model
+
+We next illustrate how these issues can be easily addressed by extending the the previous two-level model to a three-level model where responses are nested among individual students, and students nested among classrooms. We specify an otherwise identical model to Model 2 but add class-deviation terms to each level-2 equation. More formally, we subscript the relevant model features with $j$ for classrooms, and add terms $v_{0-3j}$ to represent classroom deviations from the happiness intercept, autocorrelation, coefficient of social media use, and social media use intercept for the average class and student.
+
+$$
+\begin{align*}
+Y_{ijt} \sim\ &N(\eta_{ijt}, \sigma_{ijt}^2), \\
+\eta_{ijt} =\ &I_{Hijt}(\beta_{0ij} + 
+    \beta_{1ij}(H_{ijt-1} - \beta_{0ij}) + 
+    \beta_{2ij}(SM_{ijt} - \beta_{3ij})) + \\
+  &I_{SMijt}(\beta_{3ij}), \\
+\sigma_{ijt} =\ &\text{exp}(I_{Hijt}\kappa_0 + I_{SMijt}\kappa_1), \\
+\beta_{0ji} =\ &\bar{\beta}_0 + u_{0i} + v_{0j}, \\
+\beta_{1ji} =\ &\bar{\beta}_1 + u_{1i} + v_{1j}, \\
+\beta_{2ji} =\ &\bar{\beta}_2 + u_{2i} + v_{2j}, \\
+\beta_{3ji} =\ &\bar{\beta}_3 + u_{3i} + v_{3j}.
+\tag{4}
+\end{align*}
+$$
+
+Notice that the only difference between equations 3 and 4 is that the latter includes class-specific $v$ terms and their corresponding multivariate distribution (which we omit for brevity). Similarly, the brms code to specify this model is identical but for the addition of the `(1 |c| class)` term below:
+
+```{r}
+#| label: model-3-specify
+#| echo: true
+
+bform <- bf(
+  y ~ 
+    Ih * (b0 + b1*(hlag - b0) + b2*(sm - b3)) + 
+    Ism * b3,
+  nlf(sigma ~ Ih * k0 + Ism * k1),
+  c(b0, b1, b2, b3) ~ 1 + 
+    (1 |p| person) + (1 |c| class),
+  c(k0, k1) ~ 1,
+  nl = TRUE
+)
+```
+
+Drawing 2000 samples from this model took about five minutes on a modern multicore laptop. We display the key parameter estimates from this model in Table @tbl-fit-3).
+
+```{r}
+#| label: model-3-sample
+
+fit3 <- brm(
+  bform,
+  data = dat,
+  control = list(adapt_delta = 0.99),
+  file = "cache/brm-3"
+)
+```
+
+```{r}
+#| label: tbl-fit-3
+#| tbl-cap: Summaries of estimated parameters from Model 3.
+
+sm(fit3) |> 
+  mutate(
+    variable = str_replace_all(variable, "_class", "_c"),
+    variable = str_replace_all(variable, "_person", "_p")
+  ) |> 
+  kable()
+```
+
+# Discussion
+
+## Advantages
+
+Using brms for latent means models enables the use of a wide variety of methods, including nonlinear model terms, smooth terms (generalized additive mixed models), mixture models, and more.
+
+## Limitations
+
+Here, we outlined the use of the general-purpose regression modelling R package brms for estimating latent means models. This approach has two main limitations. First, by requiring us to stack the data we cannot model different variables using different distributions. In our examples, we assumed that all outcomes were normally distributed. This practical limitation can be problematic in cases, for example, when one of the outcomes is binary and the other one is a continuous variable. Second, although a wide variety of e.g. cross-lagged location-scale within-between latent means models can be fitted with brms, the commercial alternative Mplus is currently more flexible. For example, users of Mplus can specify residual DSEMs which cannot be fitted with brms.
+
+Moreover, data stacking increases the practical size of the dataset and thus can be slower to estimate than a true multivariate model, such as ones that can be fitted with Mplus.
+
+Missing data.
+
+# Disclosures
+
+## Data and code availability
+
+The online analysis supplement is readable at {{<meta site-url>}}. Our materials are available at GitHub ({{<meta repo-url>}}) and the OSF ({{<meta osf-url>}}).
+
+## Author contributions
+<!-- https://casrai.org/credit/ -->
+
+Conceptualization: MV\
+Methodology: MV\
+Software: MV, JJ\
+Validation: MV\
+Formal Analysis: MV, MGV, JJ\
+Data Curation: MV\
+Writing---Original Draft: MV\
+Writing---Review & Editing: MV\
+Visualization: MV\
+Project Administration: MV
+
+## Competing interests
+
+The author(s) declare no competing interests.
+
+<!-- Format references better in non-html formats -->
+::: {.content-hidden when-format="html"}
+# References
+
+:::{.refs}
+:::
+:::
+
+<!-- Material after this only appears in html output -->
+::: {.content-visible when-format="html"}
+
+# Appendix 1: Full Model 1 summary
+
+Here, we display the full summary that brms prints for Model 1.
+
+```{r}
+#| label: fit1-full-summary
+
+summary(fit1, prior = TRUE)
+```
+
+From top to bottom, the printout first tells us about the probability distribution we assumed for the outcome (Family), and the link functions from the regression equations to the response distribution's location (mu), scale (sigma), and potentially other parameters. Then, the formula is printed, along with a summary of the data and Hamiltonian Monte Carlo draws [@standevelopmentteam2023].
+
+Following this, the printout shows the model parameters' prior distributions (Priors). Because we did not specify any, brms automatically applied weakly informative prior distributions (appropriately scaled Student's *t*-distributions) on the standard deviation parameters, and a uniform LKJ prior on the correlation parameter [@standevelopmentteam2023]. These weakly informative priors serve only to facilitate the estimation algorithm and do not bias the resulting posterior distributions. By default, regression coefficients are not assigned any prior distribution, and are therefore not printed.
+
+The following section describes the dispersion and correlation parameters of the group-level (e.g. person-level) parameters. These are labelled "Multilevel Hyperparameters". For each, the posterior mean (Estimate) standard deviation (Est.Error), and lower (l-95%) and upper (u-95%) limits of the quantile-based credibility interval are listed. Additionally, Rhat evaluates the HMC algorithm's convergence and should be near 1.00, and the two ESS numbers indicate the effective numbers of independent samples from the posterior distribution and should be near the number of desired samples. In this example, these two values are wrapped to separate lines.
+
+The Regression Coefficients section summarizes the posterior distributions of the coefficients specified on the regression equation's RHS with the same numeric summaries as above. Further Distributional Parameters include, in the gaussian case, the residual standard deviation's posterior summary.
+
+# Appendix 2: Parameter recovery simulation
+
+Here we simulate from, specify, and validate latent means models with brms.
+
+## Univariate model
+
+The data simulation and Stan code here is based on [Joran's blog post](https://experienced-sampler.netlify.app/post/stan-hierarchical-ar/).
+
+The model is for each individual i and timepoint t,
+
+y_it ~ normal(eta_it, sigma)
+eta_it = (alpha_hat + alpha_i) + (beta_hat + beta_i) * (y_i[t-1])
+[alpha_i, beta_i] ~ mvn([0, 0], Sigma)
+
+That is we model y on an intercept and an autoregressive coefficient with varying intercepts and slopes over people.
+
+### Data
+
+We first set up the data simulation.
+
+The function returns a list that we can pass to Stan. It also contains the data generation parameters.
+
+```{r}
+#| label: sim-example
+
+source("R/simulate-univariate.R")
+
+set.seed(31121)
+dat <- simulate_univariate()
+glimpse(simulate_univariate())
+```
+
+### Stan
+
+Let us then compile and sample from the Stan model (`model-ar1.stan`) with cmdstanr
+
+```{r}
+#| label: stan-compile
+#| output: false
+
+path <- "cache/cmdstanr-example.rds"
+if (!file.exists(path)) {
+  model <- cmdstan_model("stan/model-ar1.stan", compile = FALSE)
+  model$format(
+    canonicalize = list("deprecations"),
+    overwrite_file = TRUE,
+    backup = FALSE
+  )
+  model$compile(dir = "cache/")
+  post_cmdstanr <- model$sample(
+    data = dat, 
+    adapt_delta = 0.99
+  ) |> 
+    as_draws_df()
+  saveRDS(post_cmdstanr, path)
+} else {
+  post_cmdstanr <- readRDS(path)
+}
+```
+
+Posterior summary:
+
+```{r}
+#| label: stan-ex
+
+post_cmdstanr <- post_cmdstanr |> 
+  select(
+    alpha_hat_raw, alpha_scale_raw, 
+    beta_hat, beta_scale, 
+    sigma_raw
+  ) |> 
+  rename_with(~str_remove(., "_raw"))
+
+summarize_draws(post_cmdstanr) |> 
+  kable()
+```
+
+### brms
+
+brms takes a data frame, so we convert the list here
+
+```{r}
+#| label: sim-data-show
+
+dat <- as_tibble(dat)
+dat <- dat |> 
+  mutate(yt1 = lag(y), .by = person)
+head(dat) |> 
+  kable()
+```
+
+#### Model specification
+
+We can specify this model using brms' nonlinear formulas. Note that we created the `yt1` variable (i.e. y[t-1]) above.
+
+```{r}
+#| label: sim-brms-example
+#| output: false
+
+bform <- bf(
+  y ~ 0 + alpha + beta * (yt1 - alpha),
+  alpha ~ 1 + (1 | person),
+  beta ~ 1 + (1 | person),
+  nl = TRUE
+)
+fit_brms <- brm(
+  bform,
+  data = dat,
+  file = "cache/brm-example.rds"
+)
+```
+
+We see that the estimated parameters are very close to coefficients from the Stan model
+
+```{r}
+#| label: sim-brms-table
+
+post_brms <- as_draws_df(fit_brms) |> 
+  select(
+    alpha_hat = b_alpha_Intercept,
+    alpha_scale = sd_person__alpha_Intercept,
+    beta_hat = b_beta_Intercept,
+    beta_scale = sd_person__beta_Intercept,
+    sigma
+  )
+
+bind_rows(
+  "Stan" = summarize_draws(post_cmdstanr),
+  "brms" = summarize_draws(post_brms),
+  .id = "Model"
+) |> 
+  arrange(variable, Model) |> 
+  kable()
+```
+
+### Simulation
+
+Above, we estimated the Stan and brms models once. Here, we evaluate whether they recover the specified parameters with a small simulation.
+
+```{r}
+#| label: sim-run
+
+path <- "cache/sim-univariate.rds"
+if (!file.exists(path)) {
+  # Ensure that models are compiled
+  model_stan <- cmdstan_model("stan/model-ar1.stan", compile = TRUE, dir = "cache")
+  fit_brms <- brm(
+    bform,
+    data = dat,
+    chains = 0,
+    threads = 1
+  )
+  
+  # Define simulation outputs
+  K <- 1
+  out <- vector("list", length = K)
+  
+  # Parallelization scheme:
+  # Each of two workers will launch a session that runs 4 chains in parallel
+  # resulting in total 8 cores used
+  library(future)
+  plan(multisession, workers = 2)
+  
+  for (k in 1:K) {
+    this_sample <- simulate_univariate()
+    
+    this_stan <- future({
+      model_stan$sample(
+        data = this_sample, 
+        adapt_delta = 0.99, 
+        parallel_chains = 4,
+        iter_sampling = 2000,
+        refresh = 0, 
+        show_messages = FALSE
+      )
+    }, seed = TRUE)
+    
+    this_brms <- future({
+      update(
+        fit_brms, 
+        newdata = as_tibble(this_sample) |> 
+          mutate(yt1 = lag(y), .by = person),
+        control = list(adapt_delta = 0.99),
+        cores = 4,
+        iter = 2000,
+        recompile = FALSE,
+        refresh = 0,
+        silent = 2
+      )
+    }, seed = TRUE)
+    
+    this_stan <- value(this_stan) 
+    this_stan <- this_stan |> 
+      as_draws_df() |> 
+      select(
+        alpha_hat_raw, alpha_scale_raw, 
+        beta_hat, beta_scale, 
+        sigma_raw
+      ) |> 
+      rename_with(~str_remove(., "_raw")) |> 
+      summarize_draws()
+    
+    this_brms <- value(this_brms) 
+    this_brms <- this_brms |> 
+      as_draws_df() |> 
+      select(
+        alpha_hat = b_alpha_Intercept,
+        alpha_scale = sd_person__alpha_Intercept,
+        beta_hat = b_beta_Intercept,
+        beta_scale = sd_person__beta_Intercept,
+        sigma
+      ) |> 
+      summarize_draws()
+    
+    out[[k]] <- bind_rows(
+      "Stan" = this_stan,
+      "brms" = this_brms,
+      .id = "model"
+    )
+  }
+  
+  out <- bind_rows(out, .id = "k")
+  saveRDS(out, path)
+} else {out <- readRDS(path)}
+```
+
+#### Results
+
+```{r}
+#| label: tbl-simulation
+
+real_values <- tribble(
+  ~variable, ~true,
+  "sigma", 1, 
+  "alpha_hat", 4, 
+  "alpha_scale", 1, 
+  "beta_hat", 0.4, 
+  "beta_scale", 0.1
+)
+out |> 
+  summarise(
+    mean = str_glue("{number(mean(mean), .01)} ({number(sd(mean), .01)})"),
+    .by = c(model, variable)
+  ) |> 
+  pivot_wider(
+    names_from = model, values_from = mean
+  ) |> 
+  left_join(
+    real_values
+  ) |> 
+  kable()
+```
+
+## Conclusion
+
+This small simulation shows that brms perfectly recovers parameters of a simple univariate autoregressive latent variable model. The mean estimates over 30 simulation iterations were identical for brms and Stan to the second significant digit, and within MCSE of the true values.
+
+# Appendix 3: Further examples
+
+Here, we replicate models 4-8 from "A Primer on Two-Level Dynamic Structural Equation Models for Intensive Longitudinal Data in Mplus" [@mcneish2020]. This appendix serves both to illustrate the syntax in more detail and compare the resulting estimates from those obtained from Mplus.
+
+```{r}
+#| label: data-mcneish-hamaker
+
+# "A primer on two-level dynamic structural equation models for intensive longitudinal data in Mplus" (McNeish & Hamaker, 2020). Those data are available on the OSF (<https://osf.io/wuprx/>).
+
+path <- "data/mh.zip"
+url <- "https://files.osf.io/v1/resources/wuprx/providers/osfstorage/5bfc839601593f0016774697/?zip="
+if (!file.exists(path)) {
+  dir.create(dirname(path), showWarnings = FALSE)
+  download.file(
+    url,
+    destfile = path
+  )
+  unzip(path, exdir = "data/mh/")
+}
+
+path <- "data/mcneish-hamaker.rds"
+if (!file.exists(path)) {
+d <- read_csv(
+  "data/mh/Data/Two-Level Data.csv", 
+  col_names = c("urge", "dep", "js", "hs", "person", "time")
+) %>% 
+  select(
+    person, time, js, hs, urge, dep
+  ) |> 
+  mutate(
+    person = factor(person),
+    time = as.integer(time-1)
+  )
+write_rds(d, path)
+}
+```
+
+```{r}
+#| label: mplus-parameters
+# Read and wrangle MH's Mplus model parameters for comparison
+
+path <- "data/mplus-estimates.rds"
+if (!file.exists(path)) {
+  
+  library(MplusAutomation)
+  
+  mplus <- readModels("data/mh/Output Files")
+  mplus <- map(mplus, ~pluck(., "parameters") |> pluck("unstandardized"))
+  names(mplus) <- str_extract(names(mplus), "equation\\.[0-9]")
+  
+  mplus$equation.4 <- mplus$equation.4[c(3, 5, 6, 4, 2, 1, 7, 9, 10, 8), ]
+  mplus$equation.5 <- mplus$equation.5[c(11, 7, 8, 12, 3, 4, 13, 5, 6, 10, 9, 2, 1, 15, 16, 17, 14), ]
+  mplus$equation.6 # This is missing parameters
+  mplus$equation.7
+  
+  mplus <- map(mplus, ~rename(., q50 = est, q2.5 = lower_2.5ci, q97.5 = upper_2.5ci))
+  
+  mplus <- map(
+    mplus, 
+    ~mutate(
+      .,
+      across(where(is.numeric), ~number(., .01)),
+      mplus = str_glue("{q50} [{q2.5}, {q97.5}]")
+    )
+  )
+  write_rds(mplus, path)
+}
+
+mplus <- read_rds(path)
+```
+
+
+## Data
+
+These example data are 100 individuals' reports of urge to smoke (`urge`) and depression (`dep`) at 50 time points [@mcneish2020]. We also have their (non-time-varying) job stress (`js`) and home stress (`hs`). We also create lagged versions of urge to smoke (`u_lag`) and depression (`u_dep`) for use in the analyses. We show these data in @tbl-a1-1).
+
+```{r}
+#| label: tbl-a1-1
+#| tbl-cap: First six rows of the example dataset on urge to smoke and depression.
+
+dat <- read_rds("data/mcneish-hamaker.rds") |> 
+  mutate(
+    u_lag = lag(urge), 
+    d_lag = lag(dep), 
+    .by = person
+  )
+dat |> 
+  head() |> 
+  kable()
+```
+
+## Univariate latent means model
+
+We begin with a univariate model of the urge to smoke. This model examines the degree of autocorrelation in the urge to smoke and how it varies between people. For individual *i* in 1...I=100 and time point *t* in 1...T=50, we model `urge` (U) as normally distributed. We model the mean on person-specific intercepts $\alpha_i$ and slopes of that person's within-person centered `urge` at a previous time point $\phi_i$. Person-specific parameters are modelled as multivariate normal on the population-level parameters (with hats). We do not model correlations between the intercepts and slopes.
+
+First, let us pay some attention to the issue of within-person centering. Instead of decomposing urge to smoke into its within- and between-person components before fitting the model, we use "latent mean centering". What this means is that we estimate the person means along with other model parameters, and subtract those means from the observed values in one step. We refer to the latent person mean variables with an upperscript c (e.g. $U^c_{it}$).
+
+$$
+\begin{align*}
+U_{it} &\sim N(\alpha_i + \phi_i U^c_{it-1}, \sigma^2), \\
+\begin{bmatrix}
+  \alpha_i \\ \phi_i
+\end{bmatrix} &\sim MVN\left(
+  \begin{bmatrix}
+    \bar{\alpha} \\ \bar{\phi}
+  \end{bmatrix},
+  \begin{pmatrix}
+  \tau_\alpha \ &0 \\ 0 \ &\tau_\phi
+  \end{pmatrix}
+\right).
+\tag{a1}
+\end{align*}
+$$
+
+This model is sometimes written with separate "level 1" and "level 2" equations:
+
+$$
+\begin{align*}
+U_{it} &\sim N(\alpha_i + \phi_i U^c_{it-1}, \sigma^2), \\
+\alpha_i &= \bar{\beta}_{00} + u_{0i}, \\
+\phi_i &= \bar{\beta}_{10} + u_{1i}, \\
+\beta_i &= \bar{\beta}_{20} + u_{2i}, \\
+\mathbf{u} &\sim MVN(\dots)
+\tag{a2}
+\end{align*}
+$$
+
+We will use the R package brms [@bürkner2017] to estimate this model. The following code chunk shows how to specify this model inside brms' `bf()` ("brmsformula") function. In the first line, we specify a regression equation for `urge`. Everything on the right-hand side of this formula (to the right of the tilde) is treated as a regression coefficient to be estimated from data *unless* it is the exact name of a variable in the data. Thus we will be estimating an `alpha` (intercept) and a `phi` (the autoregressive coefficient). 
+
+The only "special" part in this syntax is `(u_lag - alpha)` that does the "latent mean centering" of the lagged urge variable. That is, it just subtracts `alpha` from each lagged value, and then uses the resulting demeaned lagged variable to predict the current urge. The first line can be considered the "level 1" equation or rather the *nonlinear* part of the model.
+
+```{r}
+model <- bf(
+  urge ~ alpha + phi * (u_lag - alpha),
+  alpha ~ 1 + (1 | person),
+  phi ~ 1 + (1 | person),
+  nl = TRUE
+)
+```
+
+The second and third lines then specify the "level 2" equation, or rather linear equations to predict the parameters in the above (potentially) nonlinear model. Both regression parameters are modelled on a population level intercept (the gamma in Equation A1) and person-specific deviations from it.
+
+The fourth line specifying `nl = TRUE` is critical, because it allows us to specifically name parameters inside `bf()`, and thereby to e.g. construct the latent mean centered variable on the first row.
+
+Note that the linear models of `alpha` and `phi` are identical. We can therefore use the following shorthand to assign them the same linear model:
+
+```{r}
+#| label: ex-1-bf
+#| echo: true
+
+model <- bf(
+  urge ~ alpha + phi * (u_lag - alpha),
+  alpha + phi ~ 1 + (1 | person),
+  nl = TRUE
+)
+```
+
+We will use that shorthand going forward. We could also indicate the distribution that we assume for the data. But in this work we model everything as gaussian, which is the software default and thus doesn't need to be separately indicated.
+
+We then sample from the model. Everything from here on is standard operating procedure.
+
+```{r}
+#| label: ex-1-fit
+
+fit <- brm(
+  model,
+  data = dat,
+  file = "cache/brm-example-univariate"
+)
+```
+
+The object `fit` now contains the estimated model (the data, posterior samples, and lots of brms-specific information). We can call `summary(fit)` to see a default summary of the model.
+
+```{r}
+#| label: ex-1-summary
+
+summary(fit)
+```
+
+The first few rows above print information about the model (the formulas, data, and number of posterior samples). Then, "Group-Level Effects" are standard deviations (and correlations, if estimated) of the parameters that we allowed to vary across individuals (as indicated by `~person`). For each of those parameters, one row indicates its posterior summary statistics; "Estimate" is the posterior mean, "Est.Error" is the posterior standard deviation, "l-" and "u-95% CI" are the lower and upper bounds of the 95% credibility interval (so the 2.5 and 97.5 percentiles of the posterior samples). Then, Rhat is the convergence metric which should be smaller than 1.05 (optimally 1.00) to indicate that the estimation algorithm has converged. "Bulk_" and "Tail_ESS" indicate the effective sample sizes of the posterior draws, and should be pretty large.
+
+The "Population-Level Effects" indicate the same information but for the means of the person-specific parameters' distributions; or the "fixed effects". For the average person, there is a positive autocorrelation in these data. Finally, the "Family Specific Parameters" indicate parameters that are specific to the outcome distribution. We used the default gaussian distribution, and thus get an estimated residual standard deviation.
+
+We show the results in @tbl-a1-2).
+
+```{r}
+#| label: tbl-a1-2
+#| tbl-cap: Summaries of main parameters from the example univariate model.
+
+fit |> 
+  sm() |> 
+  kable()
+```
+
+## Multilevel AR(1) Model
+
+We then turn to models with more than one variable of interest. In what follows we replicate "Two-Level Dynamic Structural Equation Models" (equations 4 to 7) from @mcneish2020.
+
+We start with the two-level AR(1) model in @mcneish2020 (equations 4a-c). This model is similar to our example model from above, but we also now include a regression coefficient for within-person centered depression, where this centering is on the latent mean of depression. The model is
+
+$$
+\begin{align*}
+U_{it} &\sim N(\alpha_i + \phi_i U^c_{it-1} + \beta_i D^c_{it}, \sigma^2), \\
+U^{c}_{it} &= U^{\text{raw}}_{it} - \alpha^U_i, \\
+D^{c}_{it} &= D^{\text{raw}}_{it} - \alpha^D_i, \\
+\begin{bmatrix}
+  \alpha^U_i \\ \alpha^D_i \\ \phi_i \\ \beta_i
+\end{bmatrix} &\sim MVN\left(
+  \begin{bmatrix}
+    \bar{\alpha^U} \\ \bar{\alpha^D} \\ \bar{\phi} \\ \bar{\beta_i}
+  \end{bmatrix},
+  \begin{pmatrix}
+    \tau_\alpha^U \ &0 \ &0 &0 \\ 
+    0 \ &\tau_\alpha^D \ &0 \ &0 \\ 
+    0 \ &0 \ &\tau_\beta \ &0 \\
+    0 \ &0 \ &0 \ &\tau_\phi
+  \end{pmatrix}
+\right)
+\end{align*}
+$$
+
+We then see from @eq-2 that we need to refer to different outcomes' parameters across model formulas. That is, when predicting the urge to smoke, we need a way to refer to the (latent) mean of depression so that we can appropriately center the depression predictor. Currently brms does not support sharing parameters across formulas for different outcomes, but we can overcome this limitation with a small data wrangling trick
+
+That is, we "stack" our data into the long format with respect to the two different outcomes, urge to smoke and depression. Then, on each row we have all variables from that measurement occasion, in addition to new ones that indicate the value of the outcome, and which outcome it refers to @tbl-a1-2).
+
+```{r}
+#| label: tbl-a1-3
+#| tbl-cap: Rearranged data for multivariate models.
+
+dat <- dat |> 
+  select(-js, -hs) |> 
+  pivot_longer(c(urge, dep), names_to = "outcome") |> 
+  mutate(
+    i_urge = if_else(outcome == "urge", 1, 0),
+    i_dep = if_else(outcome == "dep", 1, 0)
+  ) |> 
+  # Include predictors from each row
+  left_join(dat)
+
+dat |> 
+  head() |> 
+  kable()
+```
+
+Now we can model `value` and use `i_urge` and `i_dep` to control whether a parameter should apply to the outcome on a particular row. So here we want alpha, phi, and beta to apply to urge, but depb to depression. Then we can use depb to create the predictor for urge on the fly.
+
+```{r}
+#| label: ex-2-bf
+#| echo: true
+
+bform <- bf(
+  value ~ 
+    i_urge * (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2)) + 
+    i_dep * alpha2,
+  nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
+  alpha1 + phi + beta + alpha2 ~ 1 + (1 | person),
+  sigma1 + sigma2 ~ 1,
+  nl = TRUE
+)
+```
+
+Sample from model
+
+```{r}
+#| label: ex-2-fit
+
+fit <- brm(
+  bform,
+  data = dat,
+  control = list(adapt_delta = 0.95),
+  file = "cache/brm-example-4"
+)
+```
+
+Compare model summary to @mcneish2020. We can see the estimates match to within differences in priors and MCSE. Note in the code I transform standard deviations by first exponentiating draws of residual standard deviations, and then square to put them on the variance scale as in @mcneish2020.
+
+```{r}
+#| label: mplus-parameters2
+#| tbl-cap: Mplus parameter estimates.
+
+source("R/mplus-parameters.R")
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+  mutate(
+    across(starts_with("sd_"), ~.^2),
+    across(starts_with("b_sigma"), ~exp(.)^2)
+  ) |> 
+  summarise_draws(
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
+      number(.01) |> 
+      str_glue_data("{q50} [{q2.5}, {q97.5}]")
+  ) |> 
+  mutate(
+    variable = str_replace(variable, "sd_person__", "var_"),
+    mplus = mplus$equation.4$mplus
+  ) |> 
+  kable()
+```
+
+## Time-Invariant Covariates
+
+This is as above but includes time-invariant covariates js and hs, and the between-person effect of depression on urge. I label the latter as "gamma03" as in Equation 5 in @mcneish2020. Note also that I must include it in the regression equation for the outcome, and not in the "level 2" equation because the latter must be "linear formulas" in brms. There's probably other ways of doing it too.
+
+```{r}
+#| label: ex-3-bf
+#| echo: true
+
+bform <- bf(
+  value ~ 
+    i_urge * 
+    (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2) + gamma03 * alpha2) + 
+    i_dep * alpha2,
+  nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
+  alpha1 + phi + beta ~ 1 + js + hs + (1 | person),
+  alpha2 ~ 1 + (1 | person),
+  gamma03 + sigma1 + sigma2 ~ 1,
+  nl = TRUE
+)
+```
+
+With flat priors the gamma03 parameter is wonky so I set a normal(0, 3) on it.
+
+```{r}
+#| label: ex-3-prior
+
+p <- get_prior(bform, dat)
+p <- p |> 
+  mutate(
+    prior = case_when(
+      class == "b" & nlpar != "gamma03" ~ "normal(0, 1)",
+      class == "b" & nlpar == "gamma03" ~ "normal(0, 3)",
+      class == "sd" ~ "student_t(7, 0, 1)",
+      TRUE ~ prior
+    )
+  )
+```
+
+Sample from model
+
+```{r}
+#| label: ex-3-fit
+
+fit <- brm(
+  bform,
+  data = dat,
+  prior = p,
+  control = list(adapt_delta = 0.99),
+  file = "cache/brm-example-5",
+)
+```
+
+Model summary.
+
+```{r}
+#| label: ex-3-summary
+
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+  mutate(
+    across(starts_with("sd_"), ~.^2),
+    across(starts_with("b_sigma"), ~exp(.)^2)
+  ) |> 
+  summarise_draws(
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
+      number(.01) |> 
+      str_glue_data("{q50} [{q2.5}, {q97.5}]")
+  ) |> 
+  mutate(
+    variable = str_replace(variable, "sd_person__", "var_"),
+    mplus = mplus$equation.5$mplus
+  ) |> 
+  kable()
+```
+
+## Multilevel Location-Scale model
+
+Equations 5 and 6 in @mcneish2020.
+
+```{r}
+#| label: ex-5-bf
+#| echo: true
+
+bform <- bf(
+  value ~ 
+    i_urge * 
+    (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2) + gamma03 * alpha2) + 
+    i_dep * alpha2,
+  nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
+  alpha1 + phi + beta ~ 1 + js + hs + (1 | person),
+  alpha2 + sigma1 + sigma2 ~ 1 + (1 | person),
+  gamma03 ~ 1,
+  nl = TRUE
+)
+```
+
+Sample from model
+
+```{r}
+#| label: ex-5-fit
+
+fit <- brm(
+  bform,
+  data = dat,
+  prior = p,
+  control = list(adapt_delta = 0.99),
+  file = "cache/brm-example-6"
+)
+```
+
+Model summary. These match.
+
+```{r}
+#| label: tbl-ex5
+
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+  mutate(
+    across(starts_with("sd_"), ~.^2),
+    across(starts_with("b_sigma"), ~exp(.)^2)
+  ) |> 
+  summarise_draws(
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
+      number(.01) |> 
+      str_glue_data("{q50} [{q2.5}, {q97.5}]")
+  ) |> 
+  mutate(
+    variable = str_replace(variable, "sd_person__", "var_")
+  ) |> 
+  kable()
+```
+
+## Multilevel VAR(1) Model
+
+Equations 7 and 8 in @mcneish2020.
+
+```{r}
+#| label: ex-6-bf
+#| echo: true
+
+bform <- bf(
+  value ~ 
+    i_urge * (alpha1 + phi1 * (u_lag - alpha1) + phi4 * (d_lag - alpha2)) + 
+    i_dep * (alpha2 + phi2 * (d_lag - alpha2) + phi3 * (u_lag - alpha1)),
+  nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
+  alpha1 + alpha2 + phi1 + phi2 + phi3 + phi4 + sigma1 + sigma2 ~ 1 + (1 | person),
+  nl = TRUE
+)
+```
+
+Sample
+
+```{r}
+#| label: ex-6-fit
+
+fit <- brm(
+  bform,
+  data = dat,
+  control = list(adapt_delta = 0.99),
+  file = "cache/brm-example-7"
+)
+```
+
+Summarise. I wasn't sure how to transform the variance components here to match the variances on the link function scale so left them as is.
+
+```{r}
+#| label: tbl-ex6
+
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+  mutate(
+    across(starts_with("sd_"), ~.^2)
+  ) |> 
+  summarise_draws(
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
+      number(.01) |> 
+      str_glue_data("{q50} [{q2.5}, {q97.5}]")
+  ) |> 
+  mutate(
+    variable = str_replace(variable, "sd_person__", "var_"),
+    mplus = mplus$equation.7$mplus
+  ) |> 
+  kable()
+```
+
+## Conclusion
+
+We estimated models 4-7 in @mcneish2020 with brms and got very similar if not identical results.
+
+:::

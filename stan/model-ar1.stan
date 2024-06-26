@@ -2,16 +2,16 @@
 // https://experienced-sampler.netlify.app/post/stan-hierarchical-ar/#testing
 //
 
-// The input data is a vector 'y' of length 'N', we I individuals who we 
+// The input data is a vector 'y' of length 'N', we I persons who we 
 // measured T times for N (I*T) observations in total. We also have an indicator 
-// variable that illustrates what individual (1,..., I) data belong to, and what 
+// variable that illustrates what person (1,..., I) data belong to, and what 
 // measurement occasion (1,..., T) the data was collected at. 
 // Data is in long-format
 data {
   int<lower=0> N;
   int<lower=0> I;
   int<lower=0> T;
-  array[N] int<lower=1, upper=I> individual;
+  array[N] int<lower=1, upper=I> person;
   array[N] int<lower=1, upper=T> time;
   vector[N] y;
 }
@@ -36,7 +36,7 @@ parameters {
 // The model to be estimated. We model the output 'y_std[n]' to be normally 
 // distributed with mean 'alpha[n] + beta[n] * y_c[n-1]' and standard deviation
 // 'sigma'. We use the group-mean centered values of y as predictors so that 
-// alpha gives us individual means instead of intercepts.
+// alpha gives us person means instead of intercepts.
 model {
   vector[N] y_c;
   
@@ -51,13 +51,13 @@ model {
     beta[i] ~ normal(beta_hat, beta_scale);
   }
   
-  y_c[1] = y_std[1] - alpha[individual[1]];
+  y_c[1] = y_std[1] - alpha[person[1]];
   
   for (n in 2 : N) {
-    y_c[n] = y_std[n] - alpha[individual[n]];
+    y_c[n] = y_std[n] - alpha[person[n]];
     if (time[n] > 1) 
-      y_std[n] ~ normal(alpha[individual[n]]
-                        + beta[individual[n]] * y_c[n - 1], sigma);
+      y_std[n] ~ normal(alpha[person[n]] + beta[person[n]] * y_c[n - 1],
+                        sigma);
   }
 }
 generated quantities {

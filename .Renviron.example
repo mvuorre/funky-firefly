@@ -1,8 +1,0 @@
-# Use this file to set environment variables
-# Remove .example extension and modify with your setup
-
-# Maximum number of cores to use in R
-MAX_CORES = 4
-
-# brms backend (cmdstanr or rstan)
-BRMS_BACKEND = "rstan"

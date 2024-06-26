@@ -1,43 +1,32 @@
 # Introduction to latent means models in R
 
 
-Repository for our manuscript discussing an
-[R](https://cran.r-project.org/) and
-[brms](https://cran.r-project.org/web/packages/brms/) implementation of
-latent mean centering in multilevel models of longitudinal psychological
-data.
+Repository for our manuscript discussing an [R](https://cran.r-project.org/) and [brms](https://cran.r-project.org/web/packages/brms/) implementation of latent mean centering in multilevel models of longitudinal psychological data.
 
-- Repo on GitHub: <https://github.com/mvuorre/latent-mean-centering-ms>
+- Repo on GitHub: <https://github.com/mvuorre/funky-firefly>
 - Archived repo: tbd
 - Online: tbd
 - preprint: tbd
 
 ## Reproduce
 
-Everything is coded in [R](https://cran.r-project.org/) and bunched
-together as a [Quarto](https://quarto.org/) website. To reproduce, clone
-the repo and render the Quarto documents:
+To reproduce, download our materials, restore the R environment (renv) and knit `ms.Rmd`.
+
+In terminal:
 
 ``` bash
 # Download materials
-git clone https://github.com/mvuorre/latent-mean-centering-ms.git
-cd latent-mean-centering-ms
+git clone https://github.com/mvuorre/funky-firefly.git
 
-# Set up R environment
-Rscript -e 'renv::restore(prompt = FALSE)'
+# Enter directory
+cd funky-firefly
 
-# Modify environment variables in .Renviron.example & rename it to .Renviron
+# (Optional) modify .Renviron.example & rename it to .Renviron
 
-# Run code and render outputs
-quarto render
+# Run code and produce outputs
+make
 ```
-
-Once the computations are finished (this will take a long time depending
-on your computer) the rendered documents are in `docs/`.
 
 ## Contribute
 
-Contributions preferably via pull requests. You can also grab the
-rendered manuscript (Word, PDF) from the latest
-[release](https://github.com/mvuorre/latent-mean-centering-ms/releases)
-for comments & edits.
+Contributions preferably via pull requests. You can also grab the rendered manuscript (Word, PDF) from the latest [release](https://github.com/mvuorre/latent-mean-centering-ms/releases) for comments & edits.

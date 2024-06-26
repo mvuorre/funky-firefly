@@ -1,34 +1,37 @@
 project:
-  type: website
+  title: "Preprint"
+  render:
+    - index.qmd
   output-dir: docs
 
-website:
-  title: Latent means models in R
-  sidebar:
-    style: docked
-    search: false
-    contents:
-      - text: README
-        file: index.qmd
-      - data.qmd
-      - examples.qmd
-      - simulation.qmd
-      - text: Manuscript
-        file: manuscript.qmd
+site-url: https://mvuorre.github.io/funky-firefly
+repo-url: https://github.com/mvuorre/funky-firefly
+osf-url: https://osf.io/
+preprint-url: https://osf.io/preprints/psyarxiv/
 
 format:
-  html: 
-    theme: default
-    code-fold: show
+  html:
     toc: true
-    toc-location: right
-    title-block-style: default
-    title-block-banner: false
+    fontsize: 14pt
+    other-links: 
+      - text: Preprint (PsyArXiv)
+        href: https://
+        icon: file-pdf
+      - text: Online supplement
+        href: https://mvuorre.github.io/funky-firefly
+        icon: globe2
+      - text: GitHub Repository
+        href: https://osf.io/
+        icon: github
+      - text: OSF Repository
+        href: https://github.com/mvuorre/funky-firefly
+        icon: archive
+  preprint-typst:
+    output-file: ms.pdf
+    fontsize: 11pt
+    mainfont: Libertinus Serif
+  preprint-docx:
+    output-file: ms.docx
 
 execute:
-  freeze: true
-  message: false
-  warning: false
-  cache: true
-
-bibliography: references.bib
+  freeze: auto
