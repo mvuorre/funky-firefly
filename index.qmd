@@ -1,21 +1,21 @@
 ---
 title: Estimating dynamic structural equation models in R with the brms package
 running-head: DSEM with R & brms
-author: 
+author:
   - name: Matti Vuorre
-    affiliation: 
+    affiliation:
       - ref: 1
     corresponding: true
     email: mjvuorre@uvt.nl
     orcid: 0000-0001-5052-066X
   - name: Mauricio Garnier-Villarreal
-    affiliation: 
+    affiliation:
       - ref: 2
   - name: Ethan McCormick
-    affiliation: 
+    affiliation:
       - ref: 3
   - name: Joran Jongerling
-    affiliation: 
+    affiliation:
       - ref: 4
 affiliations:
   - id: 1
@@ -29,7 +29,7 @@ affiliations:
     name: Tilburg University
     department: Methods and Statistics
 abstract: |
-  Dynamic Structural Equation Models (DSEM) combine latent variables, time-series (lagged) relations, and hierarchical structures for flexible analyses of intensive longitudinal data, such as collected in experience sampling and other longitudinal designs [@asparouhov2018]. However, the general availability of DSEM is currently limited to commercial and closed source software packages. Here, we show how to specify flexible DSEMs with the popular free and open source brms R package. Using example data on adolescent well-being from the published literature [@beyens2020], we demonstrate two- and three-level location-scale models with lagged relations, time varying and time-invariant covariates, and how to post-process the models for effective communication of results. In an online supplement, we confirm the validity of our approach with a parameter recovery simulation, and compare our results using example analyses from @mcneish2020. DSEMs provide an exciting and robust framework for analyses of intensive longitudinal data and we hope our illustration of estimating them with free and open source software packages spurs advances in the area. 
+  Dynamic Structural Equation Models (DSEM) combine latent variables, time-series (lagged) relations, and hierarchical structures for flexible analyses of intensive longitudinal data, such as collected in experience sampling and other longitudinal designs [@asparouhov2018]. However, the general availability of DSEM is currently limited to commercial and closed source software packages. Here, we show how to specify flexible DSEMs with the popular free and open source brms R package. Using example data on adolescent well-being from the published literature [@beyens2020], we demonstrate two- and three-level location-scale models with lagged relations, time varying and time-invariant covariates, and how to post-process the models for effective communication of results. In an online supplement, we confirm the validity of our approach with a parameter recovery simulation, and compare our results using example analyses from @mcneish2020. DSEMs provide an exciting and robust framework for analyses of intensive longitudinal data and we hope our illustration of estimating them with free and open source software packages spurs advances in the area.
 keywords: [R, brms, statistics, latent variable, dynamic structural equation model]
 authornote: |
   This manuscript is not yet peer reviewed.
@@ -82,7 +82,7 @@ theme_set(
 # Model estimation options, customize in .Renviron
 dir.create("cache", FALSE)
 options(
-  brms.backend = Sys.getenv("BRMS_BACKEND", "rstan"), 
+  brms.backend = Sys.getenv("BRMS_BACKEND", "rstan"),
   brms.threads = as.numeric(Sys.getenv("MAX_CORES"), 1),
   mc.cores = as.numeric(Sys.getenv("MAX_CORES"), 4)
 )
@@ -93,18 +93,18 @@ options(
 
 # Neat posterior summaries
 sm <- function(
-    x, 
+    x,
     variables = c("b_", "sd_", "cor_", "sigma")
 ) {
-  x |> 
-    as_draws_df(variable = variables, regex = TRUE) |> 
+  x |>
+    as_draws_df(variable = variables, regex = TRUE) |>
     mutate(
       across(any_of(c("k0_Intercept", "k1_Intercept")), ~exp(.x))
-    ) |> 
+    ) |>
     summarise_draws(
       mean, sd,
       ~quantile2(.x, c(.025, .975))
-    ) |> 
+    ) |>
     mutate(
       variable = str_remove_all(variable, "_Intercept")
     )
@@ -122,7 +122,7 @@ if (!file.exists(path_in)) {
   dir.create("data", FALSE)
   # Data from figshare
   download.file(
-    "https://uvaauas.figshare.com/ndownloader/files/24028271", 
+    "https://uvaauas.figshare.com/ndownloader/files/24028271",
     path_in
   )
   # Code from OSF
@@ -138,35 +138,35 @@ if (!file.exists(path_in)) {
 
 path_out <- "data/beyens-etal.rds"
 if (!file.exists(path_out)) {
-  
+
   library(haven)
-  
+
   # Active, Passive, and Total were sums of the platform (e.g. whatsapp) times
-  d <- read_spss(path_in) %>% 
+  d <- read_spss(path_in) %>%
     mutate(
       class = factor(ClassNr),
       person = factor(EthicaID),
       time = as.integer(OccNrR - 1),
       # Rescale to 0-1 interval
       sm = rowSums(
-        select(., contains("Pas"), contains("Pas")), 
+        select(., contains("Pas"), contains("Pas")),
         na.rm = TRUE
       ) / 60,
-      happy = (as.numeric(AffWB)-1) / 6, 
+      happy = (as.numeric(AffWB)-1) / 6,
       .keep = "none"
-    ) %>% 
+    ) %>%
     arrange(person, class, time)
-  
+
   # Sum scores exceeding 60minutes (i.e., less than 2.5% of all occasions per subscale) were recoded to 60 minutes. (Beyens et al. p.9)
   d$sm <- if_else(d$sm > 1.0, 1.0, d$sm)
-  
+
   # Lag well-being
-  d <- d %>% 
+  d <- d %>%
     mutate(
       hlag = lag(happy),
       .by = person
     )
-  
+
   write_rds(d, path_out)
 }
 
@@ -191,9 +191,9 @@ With these data, @beyens2020 found little relation between active or passive soc
 #| label: tbl-data-1
 #| tbl-cap: Example data.
 
-dat |> 
-  slice(1:3, .by = person) |> 
-  head() |> 
+dat |>
+  slice(1:3, .by = person) |>
+  head() |>
   kable()
 ```
 
@@ -223,7 +223,7 @@ H_{it} &\sim N(\beta_{0i} + \beta_{1i}(H_{it-1} - \beta_{0i}), \sigma^2), \\
     0 \\ 0
   \end{bmatrix},
   \begin{pmatrix}
-    \tau_0 \ & \\ 
+    \tau_0 \ & \\
     \rho_{01} \ &\tau_1
   \end{pmatrix}
 \right).
@@ -269,11 +269,11 @@ In addition to the model formula in `m1`, above we specified two more arguments 
 #| label: tbl-fit-1
 #| tbl-cap: Summaries of Model 1 key parameters' posterior distributions.
 
-fit1 |> 
-  sm() |> 
+fit1 |>
+  sm() |>
   mutate(
     variable = str_remove_all(variable, "person__")
-  ) |> 
+  ) |>
   kable()
 ```
 
@@ -291,34 +291,34 @@ We plot this model's estimated response values (`happy`) across values of its la
 #| fig-cap: "Model 1 results. A. Scatterplot of person-specific intercepts ($u_0$) and autocorrelation parameters ($u_1$). Dark points are posterior means from Model 1; light circles are point estimates from models fitted separately to individuals' data. Blue point and ellipse indicates the posterior mean and 95%CI of $\\bar{\\beta}_0$ and $\\bar{\\beta}_1$. B. Implied regression line of happiness on time-1 lagged happiness for the average person. Points indicate data values and are jittered to reduce overplotting. C. As B. but for nine individuals arranged by increasing autocorrelation coefficient."
 
 # Get slopes in increasing order and select 9
-fit1_coef <- coef(fit1)$person |> 
+fit1_coef <- coef(fit1)$person |>
   as.data.frame() |>
-  rownames_to_column("person") |> 
-  tibble() |> 
+  rownames_to_column("person") |>
+  tibble() |>
   rename_with(~str_remove_all(., "_Intercept"))
 
-nine_persons <- fit1_coef |> 
-  arrange(Estimate.b1) |> 
-  filter(((1:63) %% 7)==0) |> 
+nine_persons <- fit1_coef |>
+  arrange(Estimate.b1) |>
+  filter(((1:63) %% 7)==0) |>
   pull(person)
 
-epred_average <- dat |> 
+epred_average <- dat |>
   data_grid(
     hlag = seq_range(hlag, n = 9)
-  ) |> 
-  add_epred_draws(fit1, re_formula = NA) |> 
+  ) |>
+  add_epred_draws(fit1, re_formula = NA) |>
   mean_qi()
 
-epred_person <- dat |> 
-  filter(person %in% nine_persons) |> 
-  group_by(person) |> 
+epred_person <- dat |>
+  filter(person %in% nine_persons) |>
+  group_by(person) |>
   data_grid(
     hlag = seq_range(hlag, n = 9)
-  ) |> 
-  add_epred_draws(fit1) |> 
+  ) |>
+  add_epred_draws(fit1) |>
   mean_qi()
 
-p1 <- epred_average |> 
+p1 <- epred_average |>
   ggplot(aes(hlag, .epred)) +
   geom_ribbon(
     aes(ymin = .lower, ymax = .upper),
@@ -326,14 +326,14 @@ p1 <- epred_average |>
   ) +
   geom_line(col = "dodgerblue2") +
   geom_point(
-    data = dat |> 
+    data = dat |>
       drop_na(happy),
     aes(y = happy),
     shape = 1, alpha = 0.5, size = 0.5,
-    position = position_jitter(.01, .01)
+    position = position_jitter(.05, .05)
   )
 
-p2 <- epred_person |>   
+p2 <- epred_person |>
   ggplot(aes(hlag, .epred)) +
   geom_ribbon(
     aes(ymin = .lower, ymax = .upper),
@@ -341,8 +341,8 @@ p2 <- epred_person |>
   ) +
   geom_line(linewidth = 0.33) +
   geom_point(
-    data = dat |> 
-      filter(person %in% nine_persons) |> 
+    data = dat |>
+      filter(person %in% nine_persons) |>
       drop_na(happy),
     aes(y = happy),
     shape = 1, alpha = 0.5, size = 0.5,
@@ -350,7 +350,7 @@ p2 <- epred_person |>
   ) +
   facet_wrap("person")
 
-p1p2 <- (p1 | p2) & 
+p1p2 <- (p1 | p2) &
   scale_x_continuous(
     "Social media use",
     breaks = c(0, 0.5, 1),
@@ -366,32 +366,33 @@ p1p2 <- (p1 | p2) &
   )
 
 # Intercept-slope scatterplot
-fit1_coef_lm <- dat |> 
-  group_by(person) |> 
+fit1_coef_lm <- dat |>
+  group_by(person) |>
   group_modify(
-    ~summary(lm(happy ~ hlag, data = .x))$coefficients |> 
-      as.data.frame() |> 
-      rownames_to_column("variable") |> 
-      select(variable, estimate = Estimate, se = `Std. Error`) |> 
+    ~summary(lm(happy ~ hlag, data = .x))$coefficients |>
+      as.data.frame() |>
+      rownames_to_column("variable") |>
+      select(variable, estimate = Estimate, se = `Std. Error`) |>
       pivot_wider(
-        names_from = variable, 
+        names_from = variable,
         values_from = c(estimate, se)
       )
-  ) |> 
+  ) |>
   ungroup()
 
-fit1_fixef <- sm(fit1, variables = "b_") |> 
+fit1_fixef <- sm(fit1, variables = "b_") |>
   pivot_wider(names_from = variable, values_from = -variable)
-fit1_fixef_ellipse <- as_draws_df(fit1, variable = "b_", regex = TRUE) |> 
+fit1_fixef_ellipse <- as_draws_df(fit1, variable = "b_", regex = TRUE) |>
   summarize_draws(mean, sd)
 
 fit1_fixef_ellipse <- ellipse(
-  cor(as.data.frame(fit1)[,1:2])[1,2],
-  scale = fit1_fixef_ellipse$sd, centre = fit1_fixef_ellipse$mean
+  x = cor(as.data.frame(fit1)[,1:2])[1,2],
+  scale = fit1_fixef_ellipse$sd,
+  centre = fit1_fixef_ellipse$mean
 ) |> as_tibble()
 
-p3 <- fit1_coef |> 
-  left_join(fit1_coef_lm) |> 
+p3 <- fit1_coef |>
+  left_join(fit1_coef_lm) |>
   ggplot(aes(x = `estimate_(Intercept)`, y = estimate_hlag)) +
   scale_x_continuous(
     "Intercept",
@@ -401,24 +402,20 @@ p3 <- fit1_coef |>
     "Slope",
     expand = expansion(-0.2)
   ) +
-  # geom_segment(
-  #   aes(xend = Estimate.b0, yend = Estimate.b1),
-  #   linewidth = 0.1, alpha = 0.5
-  # ) +
   geom_point(
     aes(`estimate_(Intercept)`, estimate_hlag),
     col = "gray80", size = 0.75
   ) +
   geom_point(
-    aes(x = Estimate.b0, y = Estimate.b1), 
+    aes(x = Estimate.b0, y = Estimate.b1),
     col = "black", size = 1
   ) +
   geom_point(
     data = fit1_fixef,
     aes(
-      x=mean_b_b0, 
+      x=mean_b_b0,
       y=mean_b_b1
-    ), 
+    ),
     col = "dodgerblue2", size = 2
   ) +
   geom_path(
@@ -462,21 +459,22 @@ There is a somewhat simple solution to this issue: We can "stack" the multivaria
 #| label: tbl-data-2
 #| tbl-cap: Six rows of example data stacked to long format.
 
-dat <- dat |> 
-  pivot_longer(sm:happy, names_to = "outcome", values_to = "y") |> 
+
+dat2 <- dat |>
+  pivot_longer(sm:happy, names_to = "outcome", values_to = "y") |>
   mutate(
     Ih = if_else(outcome == "happy", 1, 0) |> as.integer(),
-    Ism = if_else(outcome == "sm", 1, 0) |> as.integer(), 
+    Ism = if_else(outcome == "sm", 1, 0) |> as.integer(),
     .before = y
-  ) |> 
+  ) |>
   left_join(dat)
 
-dat2 <- dat |> 
+dat2 <- dat2 |>
   select(class, person, time, Ih, Ism, sm, happy, hlag, y)
 
-dat2 |> 
-  slice(1:4, .by = person) |> 
-  head() |> 
+dat2 |>
+  slice(1:4, .by = person) |>
+  head() |>
   kable()
 ```
 
@@ -485,8 +483,8 @@ Consequently, we then reparameterize the model for the stacked data table to tre
 $$
 \begin{align*}
 Y_{it} \sim\ &N(\eta_{it}, \sigma_{it}^2), \\
-\eta_{it} =\ &I_{Hit}(\beta_{0i} + 
-  \beta_{1i}(H_{it-1} - \beta_{0i}) + 
+\eta_{it} =\ &I_{Hit}(\beta_{0i} +
+  \beta_{1i}(H_{it-1} - \beta_{0i}) +
   \beta_{2i}(SM_{it} - \beta_{3i})) + \\
   &I_{SMit}(\beta_{3i}), \\
 \sigma_{it} =\ &\text{exp}(I_{Hit}\kappa_0 + I_{SMit}\kappa_1).
@@ -503,8 +501,8 @@ With the data in Table @tbl-data-2), we can now specify Equation 3 with brms' mo
 #| echo: true
 
 bform <- bf(
-  y ~ 
-    Ih * (b0 + b1 * (hlag - b0) + b2 * (sm - b3)) + 
+  y ~
+    Ih * (b0 + b1 * (hlag - b0) + b2 * (sm - b3)) +
     Ism * b3,
   c(b0, b1, b2, b3) ~ 1 + (1 |p| person),
   nlf(sigma ~ Ih * k0 + Ism * k1),
@@ -530,7 +528,7 @@ fit2 <- brm(
 #| label: tbl-fit-2
 #| tbl-cap: Summaries of estimated parameters from Model 2.
 
-sm(fit2) |> 
+sm(fit2) |>
   kable()
 ```
 
@@ -542,34 +540,34 @@ In addition, we might be interested in the correlation parameters of this model.
 #| fig-cap: Implied regression lines of happiness on the previous hour's aggregated social media use for the average person (left) and for nine individuals arranged by increasing slope coefficient (right). Points indicate data values and are jittered to reduce overplotting.
 
 # Get slopes in increasing order and select 9
-tmp <- coef(fit2)$person[,,"b2_Intercept"] |> 
-  as.data.frame() |> 
-  rownames_to_column("person") |> 
-  arrange(Estimate) |> 
-  filter(((1:63) %% 7)==0) |> 
+tmp <- coef(fit2)$person[,,"b2_Intercept"] |>
+  as.data.frame() |>
+  rownames_to_column("person") |>
+  arrange(Estimate) |>
+  filter(((1:63) %% 7)==0) |>
   distinct(person)
 
-epred_average <- dat |> 
+epred_average <- dat2 |>
   data_grid(
     sm = seq_range(sm, n = 9),
     hlag = mean(hlag, na.rm = TRUE),
     Ih = 1, Ism = 0
-  ) |> 
-  add_epred_draws(fit2, re_formula = NA) |> 
+  ) |>
+  add_epred_draws(fit2, re_formula = NA) |>
   mean_qi()
 
-epred_person <- dat |> 
-  filter(person %in% tmp$person) |> 
-  group_by(person) |> 
+epred_person <- dat2 |>
+  filter(person %in% tmp$person) |>
+  group_by(person) |>
   data_grid(
     sm = seq_range(sm, n = 9),
     hlag = mean(hlag, na.rm = TRUE),
     Ih = 1, Ism = 0
-  ) |> 
-  add_epred_draws(fit2) |> 
+  ) |>
+  add_epred_draws(fit2) |>
   mean_qi()
 
-p1 <- epred_average |> 
+p1 <- epred_average |>
   ggplot(aes(sm, .epred)) +
   geom_ribbon(
     aes(ymin = .lower, ymax = .upper),
@@ -577,15 +575,15 @@ p1 <- epred_average |>
   ) +
   geom_line() +
   geom_point(
-    data = dat |> 
-      filter(Ih == 1) |> 
+    data = dat2 |>
+      filter(Ih == 1) |>
       drop_na(happy),
     aes(y = happy),
     shape = 1, alpha = 0.5,
     position = position_jitter(.01, .01)
   )
 
-p2 <- epred_person |>   
+p2 <- epred_person |>
   ggplot(aes(sm, .epred)) +
   geom_ribbon(
     aes(ymin = .lower, ymax = .upper),
@@ -593,8 +591,8 @@ p2 <- epred_person |>
   ) +
   geom_line() +
   geom_point(
-    data = dat |> 
-      filter(person %in% tmp$person, Ih == 1) |> 
+    data = dat2 |>
+      filter(person %in% tmp$person, Ih == 1) |>
       drop_na(happy),
     aes(y = happy),
     shape = 1, alpha = 0.5,
@@ -603,7 +601,7 @@ p2 <- epred_person |>
   facet_wrap("person")
 
 
-(p1 | p2) & 
+(p1 | p2) &
   scale_x_continuous(
     "Social media use",
     breaks = c(0, 0.5, 1)
@@ -630,8 +628,8 @@ We next illustrate how these issues can be easily addressed by extending the the
 $$
 \begin{align*}
 Y_{ijt} \sim\ &N(\eta_{ijt}, \sigma_{ijt}^2), \\
-\eta_{ijt} =\ &I_{Hijt}(\beta_{0ij} + 
-    \beta_{1ij}(H_{ijt-1} - \beta_{0ij}) + 
+\eta_{ijt} =\ &I_{Hijt}(\beta_{0ij} +
+    \beta_{1ij}(H_{ijt-1} - \beta_{0ij}) +
     \beta_{2ij}(SM_{ijt} - \beta_{3ij})) + \\
   &I_{SMijt}(\beta_{3ij}), \\
 \sigma_{ijt} =\ &\text{exp}(I_{Hijt}\kappa_0 + I_{SMijt}\kappa_1), \\
@@ -650,11 +648,11 @@ Notice that the only difference between equations 3 and 4 is that the latter inc
 #| echo: true
 
 bform <- bf(
-  y ~ 
-    Ih * (b0 + b1*(hlag - b0) + b2*(sm - b3)) + 
+  y ~
+    Ih * (b0 + b1*(hlag - b0) + b2*(sm - b3)) +
     Ism * b3,
   nlf(sigma ~ Ih * k0 + Ism * k1),
-  c(b0, b1, b2, b3) ~ 1 + 
+  c(b0, b1, b2, b3) ~ 1 +
     (1 |p| person) + (1 |c| class),
   c(k0, k1) ~ 1,
   nl = TRUE
@@ -668,7 +666,7 @@ Drawing 2000 samples from this model took about five minutes on a modern multico
 
 fit3 <- brm(
   bform,
-  data = dat,
+  data = dat2,
   control = list(adapt_delta = 0.99),
   file = "cache/brm-3"
 )
@@ -678,11 +676,11 @@ fit3 <- brm(
 #| label: tbl-fit-3
 #| tbl-cap: Summaries of estimated parameters from Model 3.
 
-sm(fit3) |> 
+sm(fit3) |>
   mutate(
     variable = str_replace_all(variable, "_class", "_c"),
     variable = str_replace_all(variable, "_person", "_p")
-  ) |> 
+  ) |>
   kable()
 ```
 
@@ -803,9 +801,9 @@ if (!file.exists(path)) {
   )
   model$compile(dir = "cache/")
   post_cmdstanr <- model$sample(
-    data = dat, 
+    data = dat,
     adapt_delta = 0.99
-  ) |> 
+  ) |>
     as_draws_df()
   saveRDS(post_cmdstanr, path)
 } else {
@@ -818,15 +816,15 @@ Posterior summary:
 ```{r}
 #| label: stan-ex
 
-post_cmdstanr <- post_cmdstanr |> 
+post_cmdstanr <- post_cmdstanr |>
   select(
-    alpha_hat_raw, alpha_scale_raw, 
-    beta_hat, beta_scale, 
+    alpha_hat_raw, alpha_scale_raw,
+    beta_hat, beta_scale,
     sigma_raw
-  ) |> 
+  ) |>
   rename_with(~str_remove(., "_raw"))
 
-summarize_draws(post_cmdstanr) |> 
+summarize_draws(post_cmdstanr) |>
   kable()
 ```
 
@@ -838,9 +836,9 @@ brms takes a data frame, so we convert the list here
 #| label: sim-data-show
 
 dat <- as_tibble(dat)
-dat <- dat |> 
+dat <- dat |>
   mutate(yt1 = lag(y), .by = person)
-head(dat) |> 
+head(dat) |>
   kable()
 ```
 
@@ -870,7 +868,7 @@ We see that the estimated parameters are very close to coefficients from the Sta
 ```{r}
 #| label: sim-brms-table
 
-post_brms <- as_draws_df(fit_brms) |> 
+post_brms <- as_draws_df(fit_brms) |>
   select(
     alpha_hat = b_alpha_Intercept,
     alpha_scale = sd_person__alpha_Intercept,
@@ -883,8 +881,8 @@ bind_rows(
   "Stan" = summarize_draws(post_cmdstanr),
   "brms" = summarize_draws(post_brms),
   .id = "Model"
-) |> 
-  arrange(variable, Model) |> 
+) |>
+  arrange(variable, Model) |>
   kable()
 ```
 
@@ -905,35 +903,35 @@ if (!file.exists(path)) {
     chains = 0,
     threads = 1
   )
-  
+
   # Define simulation outputs
   K <- 1
   out <- vector("list", length = K)
-  
+
   # Parallelization scheme:
   # Each of two workers will launch a session that runs 4 chains in parallel
   # resulting in total 8 cores used
   library(future)
   plan(multisession, workers = 2)
-  
+
   for (k in 1:K) {
     this_sample <- simulate_univariate()
-    
+
     this_stan <- future({
       model_stan$sample(
-        data = this_sample, 
-        adapt_delta = 0.99, 
+        data = this_sample,
+        adapt_delta = 0.99,
         parallel_chains = 4,
         iter_sampling = 2000,
-        refresh = 0, 
+        refresh = 0,
         show_messages = FALSE
       )
     }, seed = TRUE)
-    
+
     this_brms <- future({
       update(
-        fit_brms, 
-        newdata = as_tibble(this_sample) |> 
+        fit_brms,
+        newdata = as_tibble(this_sample) |>
           mutate(yt1 = lag(y), .by = person),
         control = list(adapt_delta = 0.99),
         cores = 4,
@@ -943,37 +941,37 @@ if (!file.exists(path)) {
         silent = 2
       )
     }, seed = TRUE)
-    
-    this_stan <- value(this_stan) 
-    this_stan <- this_stan |> 
-      as_draws_df() |> 
+
+    this_stan <- value(this_stan)
+    this_stan <- this_stan |>
+      as_draws_df() |>
       select(
-        alpha_hat_raw, alpha_scale_raw, 
-        beta_hat, beta_scale, 
+        alpha_hat_raw, alpha_scale_raw,
+        beta_hat, beta_scale,
         sigma_raw
-      ) |> 
-      rename_with(~str_remove(., "_raw")) |> 
+      ) |>
+      rename_with(~str_remove(., "_raw")) |>
       summarize_draws()
-    
-    this_brms <- value(this_brms) 
-    this_brms <- this_brms |> 
-      as_draws_df() |> 
+
+    this_brms <- value(this_brms)
+    this_brms <- this_brms |>
+      as_draws_df() |>
       select(
         alpha_hat = b_alpha_Intercept,
         alpha_scale = sd_person__alpha_Intercept,
         beta_hat = b_beta_Intercept,
         beta_scale = sd_person__beta_Intercept,
         sigma
-      ) |> 
+      ) |>
       summarize_draws()
-    
+
     out[[k]] <- bind_rows(
       "Stan" = this_stan,
       "brms" = this_brms,
       .id = "model"
     )
   }
-  
+
   out <- bind_rows(out, .id = "k")
   saveRDS(out, path)
 } else {out <- readRDS(path)}
@@ -986,23 +984,23 @@ if (!file.exists(path)) {
 
 real_values <- tribble(
   ~variable, ~true,
-  "sigma", 1, 
-  "alpha_hat", 4, 
-  "alpha_scale", 1, 
-  "beta_hat", 0.4, 
+  "sigma", 1,
+  "alpha_hat", 4,
+  "alpha_scale", 1,
+  "beta_hat", 0.4,
   "beta_scale", 0.1
 )
-out |> 
+out |>
   summarise(
     mean = str_glue("{number(mean(mean), .01)} ({number(sd(mean), .01)})"),
     .by = c(model, variable)
-  ) |> 
+  ) |>
   pivot_wider(
     names_from = model, values_from = mean
-  ) |> 
+  ) |>
   left_join(
     real_values
-  ) |> 
+  ) |>
   kable()
 ```
 
@@ -1033,12 +1031,12 @@ if (!file.exists(path)) {
 path <- "data/mcneish-hamaker.rds"
 if (!file.exists(path)) {
 d <- read_csv(
-  "data/mh/Data/Two-Level Data.csv", 
+  "data/mh/Data/Two-Level Data.csv",
   col_names = c("urge", "dep", "js", "hs", "person", "time")
-) %>% 
+) %>%
   select(
     person, time, js, hs, urge, dep
-  ) |> 
+  ) |>
   mutate(
     person = factor(person),
     time = as.integer(time-1)
@@ -1053,22 +1051,22 @@ write_rds(d, path)
 
 path <- "data/mplus-estimates.rds"
 if (!file.exists(path)) {
-  
+
   library(MplusAutomation)
-  
+
   mplus <- readModels("data/mh/Output Files")
   mplus <- map(mplus, ~pluck(., "parameters") |> pluck("unstandardized"))
   names(mplus) <- str_extract(names(mplus), "equation\\.[0-9]")
-  
+
   mplus$equation.4 <- mplus$equation.4[c(3, 5, 6, 4, 2, 1, 7, 9, 10, 8), ]
   mplus$equation.5 <- mplus$equation.5[c(11, 7, 8, 12, 3, 4, 13, 5, 6, 10, 9, 2, 1, 15, 16, 17, 14), ]
   mplus$equation.6 # This is missing parameters
   mplus$equation.7
-  
+
   mplus <- map(mplus, ~rename(., q50 = est, q2.5 = lower_2.5ci, q97.5 = upper_2.5ci))
-  
+
   mplus <- map(
-    mplus, 
+    mplus,
     ~mutate(
       .,
       across(where(is.numeric), ~number(., .01)),
@@ -1090,14 +1088,14 @@ These example data are 100 individuals' reports of urge to smoke (`urge`) and de
 #| label: tbl-a1-1
 #| tbl-cap: First six rows of the example dataset on urge to smoke and depression.
 
-dat <- read_rds("data/mcneish-hamaker.rds") |> 
+dat <- read_rds("data/mcneish-hamaker.rds") |>
   mutate(
-    u_lag = lag(urge), 
-    d_lag = lag(dep), 
+    u_lag = lag(urge),
+    d_lag = lag(dep),
     .by = person
   )
-dat |> 
-  head() |> 
+dat |>
+  head() |>
   kable()
 ```
 
@@ -1137,7 +1135,7 @@ U_{it} &\sim N(\alpha_i + \phi_i U^c_{it-1}, \sigma^2), \\
 \end{align*}
 $$
 
-We will use the R package brms [@bürkner2017] to estimate this model. The following code chunk shows how to specify this model inside brms' `bf()` ("brmsformula") function. In the first line, we specify a regression equation for `urge`. Everything on the right-hand side of this formula (to the right of the tilde) is treated as a regression coefficient to be estimated from data *unless* it is the exact name of a variable in the data. Thus we will be estimating an `alpha` (intercept) and a `phi` (the autoregressive coefficient). 
+We will use the R package brms [@bürkner2017] to estimate this model. The following code chunk shows how to specify this model inside brms' `bf()` ("brmsformula") function. In the first line, we specify a regression equation for `urge`. Everything on the right-hand side of this formula (to the right of the tilde) is treated as a regression coefficient to be estimated from data *unless* it is the exact name of a variable in the data. Thus we will be estimating an `alpha` (intercept) and a `phi` (the autoregressive coefficient).
 
 The only "special" part in this syntax is `(u_lag - alpha)` that does the "latent mean centering" of the lagged urge variable. That is, it just subtracts `alpha` from each lagged value, and then uses the resulting demeaned lagged variable to predict the current urge. The first line can be considered the "level 1" equation or rather the *nonlinear* part of the model.
 
@@ -1199,8 +1197,8 @@ We show the results in @tbl-a1-2).
 #| label: tbl-a1-2
 #| tbl-cap: Summaries of main parameters from the example univariate model.
 
-fit |> 
-  sm() |> 
+fit |>
+  sm() |>
   kable()
 ```
 
@@ -1222,8 +1220,8 @@ D^{c}_{it} &= D^{\text{raw}}_{it} - \alpha^D_i, \\
     \bar{\alpha^U} \\ \bar{\alpha^D} \\ \bar{\phi} \\ \bar{\beta_i}
   \end{bmatrix},
   \begin{pmatrix}
-    \tau_\alpha^U \ &0 \ &0 &0 \\ 
-    0 \ &\tau_\alpha^D \ &0 \ &0 \\ 
+    \tau_\alpha^U \ &0 \ &0 &0 \\
+    0 \ &\tau_\alpha^D \ &0 \ &0 \\
     0 \ &0 \ &\tau_\beta \ &0 \\
     0 \ &0 \ &0 \ &\tau_\phi
   \end{pmatrix}
@@ -1239,18 +1237,18 @@ That is, we "stack" our data into the long format with respect to the two differ
 #| label: tbl-a1-3
 #| tbl-cap: Rearranged data for multivariate models.
 
-dat <- dat |> 
-  select(-js, -hs) |> 
-  pivot_longer(c(urge, dep), names_to = "outcome") |> 
+dat <- dat |>
+  select(-js, -hs) |>
+  pivot_longer(c(urge, dep), names_to = "outcome") |>
   mutate(
     i_urge = if_else(outcome == "urge", 1, 0),
     i_dep = if_else(outcome == "dep", 1, 0)
-  ) |> 
+  ) |>
   # Include predictors from each row
   left_join(dat)
 
-dat |> 
-  head() |> 
+dat |>
+  head() |>
   kable()
 ```
 
@@ -1261,8 +1259,8 @@ Now we can model `value` and use `i_urge` and `i_dep` to control whether a param
 #| echo: true
 
 bform <- bf(
-  value ~ 
-    i_urge * (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2)) + 
+  value ~
+    i_urge * (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2)) +
     i_dep * alpha2,
   nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
   alpha1 + phi + beta + alpha2 ~ 1 + (1 | person),
@@ -1291,20 +1289,20 @@ Compare model summary to @mcneish2020. We can see the estimates match to within 
 #| tbl-cap: Mplus parameter estimates.
 
 source("R/mplus-parameters.R")
-as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>%
   mutate(
     across(starts_with("sd_"), ~.^2),
     across(starts_with("b_sigma"), ~exp(.)^2)
-  ) |> 
+  ) |>
   summarise_draws(
-    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
-      number(.01) |> 
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |>
+      number(.01) |>
       str_glue_data("{q50} [{q2.5}, {q97.5}]")
-  ) |> 
+  ) |>
   mutate(
     variable = str_replace(variable, "sd_person__", "var_"),
     mplus = mplus$equation.4$mplus
-  ) |> 
+  ) |>
   kable()
 ```
 
@@ -1317,9 +1315,9 @@ This is as above but includes time-invariant covariates js and hs, and the betwe
 #| echo: true
 
 bform <- bf(
-  value ~ 
-    i_urge * 
-    (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2) + gamma03 * alpha2) + 
+  value ~
+    i_urge *
+    (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2) + gamma03 * alpha2) +
     i_dep * alpha2,
   nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
   alpha1 + phi + beta ~ 1 + js + hs + (1 | person),
@@ -1335,7 +1333,7 @@ With flat priors the gamma03 parameter is wonky so I set a normal(0, 3) on it.
 #| label: ex-3-prior
 
 p <- get_prior(bform, dat)
-p <- p |> 
+p <- p |>
   mutate(
     prior = case_when(
       class == "b" & nlpar != "gamma03" ~ "normal(0, 1)",
@@ -1365,20 +1363,20 @@ Model summary.
 ```{r}
 #| label: ex-3-summary
 
-as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>%
   mutate(
     across(starts_with("sd_"), ~.^2),
     across(starts_with("b_sigma"), ~exp(.)^2)
-  ) |> 
+  ) |>
   summarise_draws(
-    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
-      number(.01) |> 
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |>
+      number(.01) |>
       str_glue_data("{q50} [{q2.5}, {q97.5}]")
-  ) |> 
+  ) |>
   mutate(
     variable = str_replace(variable, "sd_person__", "var_"),
     mplus = mplus$equation.5$mplus
-  ) |> 
+  ) |>
   kable()
 ```
 
@@ -1391,9 +1389,9 @@ Equations 5 and 6 in @mcneish2020.
 #| echo: true
 
 bform <- bf(
-  value ~ 
-    i_urge * 
-    (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2) + gamma03 * alpha2) + 
+  value ~
+    i_urge *
+    (alpha1 + phi * (u_lag - alpha1) + beta * (dep - alpha2) + gamma03 * alpha2) +
     i_dep * alpha2,
   nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
   alpha1 + phi + beta ~ 1 + js + hs + (1 | person),
@@ -1422,19 +1420,19 @@ Model summary. These match.
 ```{r}
 #| label: tbl-ex5
 
-as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>%
   mutate(
     across(starts_with("sd_"), ~.^2),
     across(starts_with("b_sigma"), ~exp(.)^2)
-  ) |> 
+  ) |>
   summarise_draws(
-    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
-      number(.01) |> 
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |>
+      number(.01) |>
       str_glue_data("{q50} [{q2.5}, {q97.5}]")
-  ) |> 
+  ) |>
   mutate(
     variable = str_replace(variable, "sd_person__", "var_")
-  ) |> 
+  ) |>
   kable()
 ```
 
@@ -1447,8 +1445,8 @@ Equations 7 and 8 in @mcneish2020.
 #| echo: true
 
 bform <- bf(
-  value ~ 
-    i_urge * (alpha1 + phi1 * (u_lag - alpha1) + phi4 * (d_lag - alpha2)) + 
+  value ~
+    i_urge * (alpha1 + phi1 * (u_lag - alpha1) + phi4 * (d_lag - alpha2)) +
     i_dep * (alpha2 + phi2 * (d_lag - alpha2) + phi3 * (u_lag - alpha1)),
   nlf(sigma ~ i_urge * sigma1 + i_dep * sigma2),
   alpha1 + alpha2 + phi1 + phi2 + phi3 + phi4 + sigma1 + sigma2 ~ 1 + (1 | person),
@@ -1474,19 +1472,19 @@ Summarise. I wasn't sure how to transform the variance components here to match 
 ```{r}
 #| label: tbl-ex6
 
-as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>% 
+as_draws_df(fit, variable = c("b_", "sd_"), regex = TRUE) %>%
   mutate(
     across(starts_with("sd_"), ~.^2)
-  ) |> 
+  ) |>
   summarise_draws(
-    brms = ~quantile2(., probs = c(.5, .025, .975)) |> 
-      number(.01) |> 
+    brms = ~quantile2(., probs = c(.5, .025, .975)) |>
+      number(.01) |>
       str_glue_data("{q50} [{q2.5}, {q97.5}]")
-  ) |> 
+  ) |>
   mutate(
     variable = str_replace(variable, "sd_person__", "var_"),
     mplus = mplus$equation.7$mplus
-  ) |> 
+  ) |>
   kable()
 ```
 
